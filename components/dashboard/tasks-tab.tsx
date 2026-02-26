@@ -1,19 +1,31 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { tasks as initialTasks, type Task, type TaskStatus } from "@/lib/mock-data"
+import { useState, useCallback, useEffect } from "react"
+import { type Task, type TaskStatus } from "@/lib/mock-data"
+import { fetchTasks } from "@/lib/data-service"
 import { KanbanBoard } from "./kanban-board"
 import { TaskListView } from "./task-list-view"
 import { TaskDetailModal } from "./task-detail-modal"
 import { LastUpdatedBar } from "./last-updated-bar"
-import { LayoutGrid, List } from "lucide-react"
+import { LayoutGrid, List, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function TasksTab() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks)
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [loading, setLoading] = useState(true)
   const [view, setView] = useState<"kanban" | "list">("kanban")
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true)
+      const data = await fetchTasks()
+      setTasks(data)
+      setLoading(false)
+    }
+    loadData()
+  }, [])
 
   const handleTaskMove = useCallback(
     (taskId: string, newStatus: TaskStatus) => {
@@ -45,6 +57,17 @@ export function TasksTab() {
       (t) => t.status === "in-progress" || t.status === "in-testing"
     ).length,
     done: tasks.filter((t) => t.status === "done").length,
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-4">
+        <LastUpdatedBar />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="size-8 animate-spin text-primary" />
+        </div>
+      </div>
+    )
   }
 
   return (

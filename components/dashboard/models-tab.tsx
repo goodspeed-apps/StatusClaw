@@ -1,18 +1,44 @@
 "use client"
 
-import { models } from "@/lib/mock-data"
+import { useState, useEffect } from "react"
+import { type LLMModel } from "@/lib/mock-data"
+import { fetchModels } from "@/lib/data-service"
 import { ModelRow } from "./model-card"
 import { SpendDisplay } from "./spend-display"
 import { SpendChart } from "./spend-chart"
 import { LastUpdatedBar } from "./last-updated-bar"
-import { DollarSign } from "lucide-react"
+import { DollarSign, Loader2 } from "lucide-react"
 
 export function ModelsTab() {
+  const [models, setModels] = useState<LLMModel[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true)
+      const data = await fetchModels()
+      setModels(data)
+      setLoading(false)
+    }
+    loadData()
+  }, [])
+
   const overallModelSpend = {
-    day: models.reduce((sum, m) => sum + m.spend.day, 0),
-    week: models.reduce((sum, m) => sum + m.spend.week, 0),
-    month: models.reduce((sum, m) => sum + m.spend.month, 0),
-    total: models.reduce((sum, m) => sum + m.spend.total, 0),
+    day: models.reduce((sum, m) => sum + (m.spend?.day || 0), 0),
+    week: models.reduce((sum, m) => sum + (m.spend?.week || 0), 0),
+    month: models.reduce((sum, m) => sum + (m.spend?.month || 0), 0),
+    total: models.reduce((sum, m) => sum + (m.spend?.total || 0), 0),
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-4">
+        <LastUpdatedBar />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="size-8 animate-spin text-primary" />
+        </div>
+      </div>
+    )
   }
 
   return (

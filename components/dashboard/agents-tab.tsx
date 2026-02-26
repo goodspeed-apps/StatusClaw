@@ -1,18 +1,32 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { agents, tasks as initialTasks, type Task } from "@/lib/mock-data"
+import { useState, useCallback, useEffect } from "react"
+import { type Task, type Agent } from "@/lib/mock-data"
+import { fetchAgents, fetchTasks } from "@/lib/data-service"
 import { AgentRow } from "./agent-card"
 import { SpendDisplay } from "./spend-display"
 import { SpendChart } from "./spend-chart"
 import { LastUpdatedBar } from "./last-updated-bar"
 import { TaskDetailModal } from "./task-detail-modal"
-import { DollarSign } from "lucide-react"
+import { DollarSign, Loader2 } from "lucide-react"
 
 export function AgentsTab() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks)
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [loading, setLoading] = useState(true)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true)
+      const [agentsData, tasksData] = await Promise.all([fetchAgents(), fetchTasks()])
+      setAgents(agentsData)
+      setTasks(tasksData)
+      setLoading(false)
+    }
+    loadData()
+  }, [])
 
   const activeAgents = agents.filter((a) => a.status === "active").length
 
@@ -35,6 +49,17 @@ export function AgentsTab() {
     setSelectedTask(updatedTask)
     setModalOpen(false)
   }, [])
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-4">
+        <LastUpdatedBar />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="size-8 animate-spin text-primary" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
