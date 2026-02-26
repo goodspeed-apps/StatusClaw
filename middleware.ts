@@ -6,17 +6,24 @@ export function middleware(request: NextRequest) {
   if (
     request.nextUrl.pathname.startsWith('/_next') ||
     request.nextUrl.pathname.startsWith('/static') ||
-    request.nextUrl.pathname.startsWith('/api/')
+    request.nextUrl.pathname.startsWith('/api/') ||
+    request.nextUrl.pathname.startsWith('/favicon')
   ) {
     return NextResponse.next()
   }
 
   const authHeader = request.headers.get('authorization')
+  
+  // Get credentials from env vars with fallbacks
+  // Note: In Vercel, these must be set in the dashboard
   const expectedUser = process.env.AUTH_USER || 'admin'
   const expectedPass = process.env.AUTH_PASS || 'changeme'
-  const expectedAuth = 'Basic ' + Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64')
-
-  if (authHeader !== expectedAuth) {
+  
+  // Create expected auth string
+  const expectedAuth = 'Basic ' + btoa(`${expectedUser}:${expectedPass}`)
+  
+  // Check auth
+  if (!authHeader || authHeader !== expectedAuth) {
     return new NextResponse('Unauthorized', {
       status: 401,
       headers: {
@@ -29,5 +36,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next|static|api).*)'],
+  matcher: ['/((?!_next|static|api|favicon).*)'],
 }
