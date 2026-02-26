@@ -15,7 +15,7 @@ export function middleware(request: NextRequest) {
   
   // Read env vars with detailed fallback
   const expectedUser = process.env.AUTH_USER || 'admin'
-  const expectedPass = process.env.AUTH_PASS || 'changeme'
+  const expectedPass = process.env.AUTH_PASSWORD || process.env.AUTH_PASS || 'changeme'
   
   // Create expected auth
   const credentials = `${expectedUser}:${expectedPass}`
