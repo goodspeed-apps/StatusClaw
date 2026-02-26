@@ -1,33 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// HTTP Basic Auth for password protection
 export function middleware(request: NextRequest) {
-  // Skip auth for static assets and API routes
+  // Skip auth for assets and API
   if (
     request.nextUrl.pathname.startsWith('/_next') ||
     request.nextUrl.pathname.startsWith('/static') ||
     request.nextUrl.pathname.startsWith('/api/') ||
-    request.nextUrl.pathname.startsWith('/favicon')
+    request.nextUrl.pathname === '/favicon.ico'
   ) {
     return NextResponse.next()
   }
 
   const authHeader = request.headers.get('authorization')
   
-  // Get credentials from env vars with fallbacks
-  // Note: In Vercel, these must be set in the dashboard
+  // Read env vars with detailed fallback
   const expectedUser = process.env.AUTH_USER || 'admin'
   const expectedPass = process.env.AUTH_PASS || 'changeme'
   
-  // Create expected auth string
-  const expectedAuth = 'Basic ' + btoa(`${expectedUser}:${expectedPass}`)
+  // Create expected auth
+  const credentials = `${expectedUser}:${expectedPass}`
+  const expectedAuth = 'Basic ' + btoa(credentials)
   
-  // Check auth
-  if (!authHeader || authHeader !== expectedAuth) {
-    return new NextResponse('Unauthorized', {
+  if (authHeader !== expectedAuth) {
+    return new NextResponse('Unauthorized - Check AUTH_USER and AUTH_PASS env vars', {
       status: 401,
       headers: {
         'WWW-Authenticate': 'Basic realm="StatusClaw Dashboard"',
+        'Content-Type': 'text/plain',
       },
     })
   }
