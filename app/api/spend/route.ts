@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { spendTracker, fetchOpenRouterKeyUsage, getAggregatedSpendData } from '@/lib/spend-tracker'
+import { getAggregatedSpendData, PRICING } from '@/lib/spend-tracker'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,49 +7,31 @@ export async function GET() {
   try {
     const openRouterKey = process.env.OPENROUTER_API_KEY
     
-    let realData = null
-    let usingRealData = false
+    // Get aggregated data - this will fetch real OpenRouter data if key is available
+    const aggregated = await getAggregatedSpendData(openRouterKey)
     
-    // Try to fetch real data from OpenRouter
-    if (openRouterKey) {
-      const result = await fetchOpenRouterKeyUsage(openRouterKey)
-      if (result.success && result.usage) {
-        realData = result.usage
-        usingRealData = true
-        
-        // Add a record for tracking
-        spendTracker.addRecord({
-          timestamp: new Date().toISOString(),
-          provider: 'openrouter',
-          model: 'aggregate',
-          agentId: 'system',
-          cost: result.usage.weekly,
-          tokens: { prompt: 0, completion: 0, total: 0 }
-        })
-      }
-    }
-    
-    // Get aggregated data from tracker
-    const aggregated = getAggregatedSpendData()
-    
-    // If we have real data from OpenRouter, use it for the current period
-    const current = realData ? {
-      day: realData.daily,
-      week: realData.weekly,
-      month: realData.monthly,
-      total: realData.weekly * 4 // Estimate monthly from weekly
+    // Determine current spend - use real data if available
+    const current = aggregated.openRouterRealData ? {
+      day: aggregated.openRouterRealData.daily,
+      week: aggregated.openRouterRealData.weekly,
+      month: aggregated.openRouterRealData.monthly,
+      total: aggregated.overall.total // Keep total from tracked records
     } : aggregated.overall
+    
+    const usingRealData = !!aggregated.openRouterRealData
     
     // Return spend data
     return NextResponse.json({
       current,
       byAgent: aggregated.byAgent,
       byModel: aggregated.byModel,
+      byProvider: aggregated.byProvider,
       usingRealData,
+      pricing: PRICING,
       lastUpdated: new Date().toISOString(),
       message: usingRealData 
-        ? 'Using real OpenRouter data' 
-        : 'Using estimated data - set OPENROUTER_API_KEY for real-time spend tracking'
+        ? 'Using real OpenRouter data + tracked Nano Banana Pro costs' 
+        : 'Using estimated data - add OPENROUTER_API_KEY for real-time spend tracking'
     })
   } catch (error) {
     console.error('Spend API error:', error)
