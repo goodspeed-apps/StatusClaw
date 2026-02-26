@@ -2,6 +2,7 @@
 
 import { SpendTracker } from '@/components/SpendTracker';
 import { TestPanel } from '@/components/TestPanel';
+import { AgentStatusPanel } from '@/components/AgentStatus';
 
 export default function Home() {
   return (
@@ -17,6 +18,11 @@ export default function Home() {
             Monitor API costs for OpenRouter and Nano Banana Pro in real-time.
           </p>
         </header>
+
+        {/* Agent Status Panel */}
+        <div className="mb-8">
+          <AgentStatusPanel refreshInterval={30000} />
+        </div>
 
         <div className="mb-8 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
           <h2 className="font-semibold text-blue-900 dark:text-blue-300 mb-2">Quick Start</h2>
