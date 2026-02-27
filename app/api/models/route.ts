@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { spendTracker, getAggregatedSpendData } from '@/lib/spend-tracker'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,11 +15,12 @@ const KNOWN_MODELS = [
 
 export async function GET() {
   try {
-    // Aggregate spend by model from spend data
-    const spendByModel = await getModelSpendData()
+    // Get real spend data from spend tracker
+    const aggregated = await getAggregatedSpendData()
+    const spendByModel = aggregated.byModel
     
-    // Get agent counts per model
-    const agentCounts = await getAgentCountsByModel()
+    // Get agent counts per model from actual records
+    const agentCounts = getAgentCountsByModel()
     
     const models = KNOWN_MODELS.map(model => ({
       ...model,
@@ -26,29 +28,33 @@ export async function GET() {
       agentCount: agentCounts[model.id] || 0,
     })).filter(m => m.spend.total > 0 || m.agentCount > 0)
 
-    return NextResponse.json({ models })
+    return NextResponse.json({ 
+      models,
+      usingRealData: Object.keys(spendByModel).length > 0
+    })
   } catch (error) {
     console.error('API error:', error)
     return NextResponse.json({ error: 'Failed to fetch models' }, { status: 500 })
   }
 }
 
-async function getModelSpendData(): Promise<Record<string, { day: number; week: number; month: number; total: number }>> {
-  // In production, this would query OpenClaw telemetry or a metrics database
-  return {
-    'claude-opus-4': { day: 43.90, week: 278.60, month: 1131.00, total: 9305.20 },
-    'claude-sonnet-4': { day: 25.40, week: 183.60, month: 770.50, total: 5433.50 },
-    'gpt-5-mini': { day: 8.30, week: 70.30, month: 302.60, total: 2034.60 },
-    'gemini-3-flash': { day: 0.00, week: 12.40, month: 56.80, total: 398.60 },
+function getAgentCountsByModel(): Record<string, number> {
+  // Count unique agents per model from spend records
+  const records = spendTracker.getAllRecords()
+  const modelAgents: Record<string, Set<string>> = {}
+  
+  for (const record of records) {
+    if (!modelAgents[record.model]) {
+      modelAgents[record.model] = new Set()
+    }
+    modelAgents[record.model].add(record.agentId)
   }
-}
-
-async function getAgentCountsByModel(): Promise<Record<string, number>> {
-  // Map of model -> agent count
-  return {
-    'claude-opus-4': 4,
-    'claude-sonnet-4': 4,
-    'gpt-5-mini': 3,
-    'gemini-3-flash': 1,
+  
+  // Convert sets to counts
+  const counts: Record<string, number> = {}
+  for (const [model, agents] of Object.entries(modelAgents)) {
+    counts[model] = agents.size
   }
+  
+  return counts
 }
