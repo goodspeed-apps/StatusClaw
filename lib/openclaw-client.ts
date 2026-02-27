@@ -164,7 +164,10 @@ export async function saveAgentFile(filename: string, content: string): Promise<
   }
 }
 
-// Fetch spend data from OpenRouter API
+// Import spend tracker for real data
+import { getAggregatedSpendData, fetchOpenRouterKeyUsage } from './spend-tracker'
+
+// Fetch spend data from OpenRouter API and local tracker
 export async function fetchOpenRouterSpend(apiKey?: string): Promise<{
   day: number
   week: number
@@ -175,38 +178,29 @@ export async function fetchOpenRouterSpend(apiKey?: string): Promise<{
 }> {
   const openRouterKey = apiKey || process.env.OPENROUTER_API_KEY
   
-  if (!openRouterKey) {
-    console.warn('No OpenRouter API key configured, using fallback data')
-    return getFallbackSpendData()
-  }
+  // Get aggregated data from spend tracker (includes real OpenRouter + tracked Nano Banana Pro)
+  const aggregated = await getAggregatedSpendData(openRouterKey)
   
-  try {
-    // Fetch usage from OpenRouter
-    const response = await fetch('https://openrouter.ai/api/v1/credits', {
-      headers: {
-        'Authorization': `Bearer ${openRouterKey}`,
-      },
-    })
-    
-    if (!response.ok) {
-      throw new Error(`OpenRouter API error: ${response.status}`)
-    }
-    
-    const data = await response.json()
-    
-    // OpenRouter doesn't provide detailed usage breakdown via this endpoint
-    // We'd need to track this ourselves or use a different endpoint
-    return {
-      day: data.usage?.day || 0,
-      week: data.usage?.week || 0,
-      month: data.usage?.month || 0,
-      total: data.total_usage || 0,
-      byModel: {},
-      byAgent: {},
-    }
-  } catch (error) {
-    console.error('Failed to fetch OpenRouter spend:', error)
-    return getFallbackSpendData()
+  // Calculate total from tracked records
+  const totalSpend = aggregated.overall.total
+  
+  // If we have real OpenRouter data, use it for time-based totals
+  // Otherwise use tracked data
+  const hasRealData = !!aggregated.openRouterRealData
+  
+  return {
+    day: hasRealData 
+      ? aggregated.openRouterRealData!.daily + aggregated.byProvider.gemini.day
+      : aggregated.overall.day,
+    week: hasRealData 
+      ? aggregated.openRouterRealData!.weekly + aggregated.byProvider.gemini.week
+      : aggregated.overall.week,
+    month: hasRealData 
+      ? aggregated.openRouterRealData!.monthly + aggregated.byProvider.gemini.month
+      : aggregated.overall.month,
+    total: totalSpend,
+    byModel: aggregated.byModel,
+    byAgent: aggregated.byAgent,
   }
 }
 
