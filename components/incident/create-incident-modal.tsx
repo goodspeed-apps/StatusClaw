@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,11 +8,12 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { AlertTriangle, Clock, User, Tag, X } from "lucide-react"
+import { AlertTriangle, Clock, User, Tag, X, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+import type { SeverityLevel } from "@/lib/severity-level-store"
 
-export type IncidentPriority = "low" | "medium" | "high" | "critical"
-export type IncidentStatus = "open" | "investigating" | "identified" | "monitoring" | "resolved"
+export type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved"
 
 interface CreateIncidentModalProps {
   open: boolean
@@ -23,21 +24,14 @@ interface CreateIncidentModalProps {
 export interface IncidentData {
   title: string
   description: string
-  priority: IncidentPriority
+  severity: string
   status: IncidentStatus
+  service: string
   assignee: string
   tags: string[]
 }
 
-const PRIORITY_CONFIG: Record<IncidentPriority, { label: string; className: string }> = {
-  low: { label: "Low", className: "bg-muted-foreground/15 text-muted-foreground" },
-  medium: { label: "Medium", className: "bg-chart-1/15 text-chart-1" },
-  high: { label: "High", className: "bg-chart-3/15 text-chart-3" },
-  critical: { label: "Critical", className: "bg-destructive/15 text-destructive-foreground" },
-}
-
 const STATUS_CONFIG: Record<IncidentStatus, { label: string; color: string }> = {
-  open: { label: "Open", color: "bg-chart-5/20 text-chart-5" },
   investigating: { label: "Investigating", color: "bg-chart-1/20 text-chart-1" },
   identified: { label: "Identified", color: "bg-chart-3/20 text-chart-3" },
   monitoring: { label: "Monitoring", color: "bg-accent/20 text-accent" },
@@ -52,24 +46,57 @@ const MOCK_ASSIGNEES = [
   "David Brown",
 ]
 
+const COMMON_SERVICES = ["API", "Auth", "Database", "Frontend", "Infrastructure", "Payments"]
 const COMMON_TAGS = ["api", "database", "frontend", "infrastructure", "security", "performance"]
 
 export function CreateIncidentModal({ open, onOpenChange, onSubmit }: CreateIncidentModalProps) {
+  const [severityLevels, setSeverityLevels] = useState<SeverityLevel[]>([])
+  const [isLoadingSeverities, setIsLoadingSeverities] = useState(true)
   const [formData, setFormData] = useState<IncidentData>({
     title: "",
     description: "",
-    priority: "medium",
-    status: "open",
+    severity: "",
+    status: "investigating",
+    service: "API",
     assignee: "Unassigned",
     tags: [],
   })
   const [tagInput, setTagInput] = useState("")
   const titleInputRef = useRef<HTMLInputElement>(null)
 
+  // Fetch severity levels on mount
+  const fetchSeverityLevels = useCallback(async () => {
+    setIsLoadingSeverities(true)
+    try {
+      const response = await fetch('/api/severity-levels')
+      if (response.ok) {
+        const data = await response.json()
+        setSeverityLevels(data.levels)
+        // Set default severity
+        const defaultLevel = data.levels.find((l: SeverityLevel) => l.isDefault) || data.levels[0]
+        if (defaultLevel) {
+          setFormData(prev => ({ ...prev, severity: defaultLevel.slug }))
+        }
+      } else {
+        toast.error('Failed to load severity levels')
+      }
+    } catch (error) {
+      console.error('Failed to fetch severity levels:', error)
+      toast.error('Failed to load severity levels')
+    } finally {
+      setIsLoadingSeverities(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (open) {
+      fetchSeverityLevels()
+    }
+  }, [open, fetchSeverityLevels])
+
   // Focus title field when modal opens
   useEffect(() => {
     if (open) {
-      // Small delay to ensure modal is rendered
       const timer = setTimeout(() => {
         titleInputRef.current?.focus()
       }, 100)
@@ -83,8 +110,9 @@ export function CreateIncidentModal({ open, onOpenChange, onSubmit }: CreateInci
       setFormData({
         title: "",
         description: "",
-        priority: "medium",
-        status: "open",
+        severity: "",
+        status: "investigating",
+        service: "API",
         assignee: "Unassigned",
         tags: [],
       })
@@ -117,6 +145,17 @@ export function CreateIncidentModal({ open, onOpenChange, onSubmit }: CreateInci
       addTag(tagInput)
     } else if (e.key === "Backspace" && !tagInput && formData.tags.length > 0) {
       removeTag(formData.tags[formData.tags.length - 1])
+    }
+  }
+
+  const getSeverityConfig = (slug: string) => {
+    const level = severityLevels.find(l => l.slug === slug)
+    if (!level) return { label: slug, color: "bg-muted-foreground/15 text-muted-foreground", icon: AlertTriangle }
+    return {
+      label: level.name,
+      color: level.color,
+      bgColor: `${level.color}20`,
+      icon: AlertTriangle,
     }
   }
 
@@ -171,28 +210,40 @@ export function CreateIncidentModal({ open, onOpenChange, onSubmit }: CreateInci
             />
           </div>
 
-          {/* Priority & Status */}
+          {/* Severity & Status */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="incident-priority" className="text-sm font-medium flex items-center gap-1.5">
+              <Label htmlFor="incident-severity" className="text-sm font-medium flex items-center gap-1.5">
                 <AlertTriangle className="size-3.5" />
-                Priority
+                Severity
               </Label>
               <Select
-                value={formData.priority}
+                value={formData.severity}
                 onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, priority: value as IncidentPriority }))
+                  setFormData((prev) => ({ ...prev, severity: value }))
                 }
+                disabled={isLoadingSeverities}
               >
-                <SelectTrigger id="incident-priority" data-testid="incident-priority-select">
-                  <SelectValue />
+                <SelectTrigger id="incident-severity" data-testid="incident-severity-select">
+                  {isLoadingSeverities ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <SelectValue />
+                  )}
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
-                    <SelectItem key={key} value={key}>
-                      <Badge variant="secondary" className={cn("rounded-sm text-[10px] font-semibold border-0", config.className)}>
-                        {config.label}
-                      </Badge>
+                  {severityLevels.sort((a, b) => a.order - b.order).map((level) => (
+                    <SelectItem key={level.id} value={level.slug}>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: level.color }}
+                        />
+                        <span>{level.name}</span>
+                        {level.pagesOnCall && (
+                          <Badge variant="destructive" className="text-[9px] px-1 py-0">Pages</Badge>
+                        )}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -226,27 +277,50 @@ export function CreateIncidentModal({ open, onOpenChange, onSubmit }: CreateInci
             </div>
           </div>
 
-          {/* Assignee */}
-          <div className="space-y-2">
-            <Label htmlFor="incident-assignee" className="text-sm font-medium flex items-center gap-1.5">
-              <User className="size-3.5" />
-              Assignee
-            </Label>
-            <Select
-              value={formData.assignee}
-              onValueChange={(value) => setFormData((prev) => ({ ...prev, assignee: value }))}
-            >
-              <SelectTrigger id="incident-assignee" data-testid="incident-assignee-select">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MOCK_ASSIGNEES.map((assignee) => (
-                  <SelectItem key={assignee} value={assignee}>
-                    {assignee}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Service & Assignee */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="incident-service" className="text-sm font-medium">
+                Service
+              </Label>
+              <Select
+                value={formData.service}
+                onValueChange={(value) => setFormData((prev) => ({ ...prev, service: value }))}
+              >
+                <SelectTrigger id="incident-service" data-testid="incident-service-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMMON_SERVICES.map((service) => (
+                    <SelectItem key={service} value={service}>
+                      {service}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="incident-assignee" className="text-sm font-medium flex items-center gap-1.5">
+                <User className="size-3.5" />
+                Assignee
+              </Label>
+              <Select
+                value={formData.assignee}
+                onValueChange={(value) => setFormData((prev) => ({ ...prev, assignee: value }))}
+              >
+                <SelectTrigger id="incident-assignee" data-testid="incident-assignee-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MOCK_ASSIGNEES.map((assignee) => (
+                    <SelectItem key={assignee} value={assignee}>
+                      {assignee}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Tags */}
@@ -304,7 +378,7 @@ export function CreateIncidentModal({ open, onOpenChange, onSubmit }: CreateInci
             </Button>
             <Button
               type="submit"
-              disabled={!formData.title.trim()}
+              disabled={!formData.title.trim() || isLoadingSeverities || !formData.severity}
               data-testid="create-incident-submit-btn"
             >
               Create Incident

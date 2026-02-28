@@ -9,3 +9,13 @@ node_modules/
 .env*.local
 .DS_Store
 .vercel
+
+# Backup archives (local only - external backups stored in S3/R2)
+backups/*.tar.gz
+backups/*.sha256
+
+# GitHub workflow artifacts
+artifacts/
+# Data files
+data/*.json
+
