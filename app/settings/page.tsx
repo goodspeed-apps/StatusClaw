@@ -1,15 +1,31 @@
 import type { Metadata } from 'next'
-import { BrandingSettingsForm } from './branding-form'
-import { brandingStore } from '@/lib/branding-store'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Palette, AlertTriangle, Bell, ChevronRight } from 'lucide-react'
+import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'Branding Settings - StatusClaw',
-  description: 'Customize your status page branding and theme',
+  title: 'Settings - StatusClaw',
+  description: 'Configure your status page settings',
 }
 
-export default function BrandingSettingsPage() {
-  const config = brandingStore.getConfig()
-  
+const settingsSections = [
+  {
+    id: 'branding',
+    title: 'Branding',
+    description: 'Customize your status page appearance, logo, colors, and theme',
+    icon: Palette,
+    href: '/settings/branding',
+  },
+  {
+    id: 'severity-escalation',
+    title: 'Severity & Escalation',
+    description: 'Configure incident severity levels and auto-escalation rules',
+    icon: AlertTriangle,
+    href: '/settings/severity-escalation',
+  },
+]
+
+export default function SettingsIndexPage() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       {/* Header */}
@@ -20,10 +36,10 @@ export default function BrandingSettingsPage() {
           </div>
           <div>
             <h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">
-              Branding Settings
+              Settings
             </h1>
             <p className="text-xs text-muted-foreground">
-              Customize your status page appearance
+              Manage your status page configuration
             </p>
           </div>
         </div>
@@ -38,7 +54,30 @@ export default function BrandingSettingsPage() {
       {/* Main Content */}
       <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
         <div className="max-w-2xl mx-auto">
-          <BrandingSettingsForm initialConfig={config} />
+          <div className="grid gap-4">
+            {settingsSections.map((section) => (
+              <Link key={section.id} href={section.href}>
+                <Card className="hover:bg-accent/50 transition-colors cursor-pointer group">
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 rounded-lg bg-primary/10 text-primary">
+                        <section.icon className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-semibold text-lg">{section.title}</h3>
+                          <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {section.description}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
         </div>
       </main>
     </div>

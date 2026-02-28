@@ -16,3 +16,6 @@ backups/*.sha256
 
 # GitHub workflow artifacts
 artifacts/
+# Data files
+data/*.json
+
