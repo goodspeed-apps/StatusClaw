@@ -2,12 +2,18 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 
-const SPEND_DATA_FILE = join(process.cwd(), 'data', 'spend-history.json')
+// Use /tmp on Vercel (read-only filesystem except for /tmp), otherwise use data dir
+const isVercel = process.env.VERCEL === '1'
+const SPEND_DATA_FILE = isVercel 
+  ? join('/tmp', 'spend-history.json')
+  : join(process.cwd(), 'data', 'spend-history.json')
 
-// Ensure data directory exists
-try {
-  mkdirSync(join(process.cwd(), 'data'), { recursive: true })
-} catch {}
+// Ensure data directory exists (skip on Vercel, uses /tmp)
+if (!isVercel) {
+  try {
+    mkdirSync(join(process.cwd(), 'data'), { recursive: true })
+  } catch {}
+}
 
 // Pricing constants
 export const PRICING = {
