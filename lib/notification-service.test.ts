@@ -6,6 +6,7 @@ import {
   getDeduplicationStats,
   getNotificationsForIncident,
   clearNotificationStore,
+  isEmailEnabled,
   NotificationType
 } from '@/lib/notification-service'
 
@@ -229,6 +230,14 @@ describe('Notification Service - Deduplication', () => {
       const stats = getDeduplicationStats()
       expect(stats.totalRecords).toBe(2)
       expect(stats.sent).toBe(2)
+      expect(typeof stats.emailEnabled).toBe('boolean')
+    })
+  })
+
+  describe('isEmailEnabled', () => {
+    it('should return a boolean value', () => {
+      const enabled = isEmailEnabled()
+      expect(typeof enabled).toBe('boolean')
     })
   })
 

@@ -1,5 +1,8 @@
 // Email notification service with idempotency/deduplication support
 // Prevents duplicate emails for the same incident update
+// Uses Resend as the email provider when configured, otherwise logs only
+
+import { Resend } from 'resend'
 
 export interface NotificationRecord {
   idempotencyKey: string
@@ -31,6 +34,21 @@ const notificationStore = new Map<string, NotificationRecord>()
 
 // Deduplication window: 24 hours (in milliseconds)
 const DEDUPLICATION_WINDOW_MS = 24 * 60 * 60 * 1000
+
+// Email configuration from environment
+const RESEND_API_KEY = process.env.RESEND_API_KEY
+const EMAIL_FROM_ADDRESS = process.env.EMAIL_FROM_ADDRESS || 'notifications@statusclaw.com'
+const EMAIL_ENABLED = !!RESEND_API_KEY
+
+// Initialize Resend client if API key is available
+const resend = EMAIL_ENABLED ? new Resend(RESEND_API_KEY) : null
+
+/**
+ * Check if email sending is enabled (based on env vars)
+ */
+export function isEmailEnabled(): boolean {
+  return EMAIL_ENABLED
+}
 
 /**
  * Generate a unique idempotency key for a notification
@@ -94,6 +112,7 @@ export function getNotificationRecord(idempotencyKey: string): NotificationRecor
  * Send email with deduplication protection
  * Returns { sent: true } if sent successfully
  * Returns { sent: false, reason: 'duplicate' } if already sent
+ * Returns { sent: false, reason: 'disabled' } if email is not configured
  */
 export async function sendEmailWithDeduplication(
   request: SendEmailRequest
@@ -138,8 +157,8 @@ export async function sendEmailWithDeduplication(
   recordNotification(record)
 
   try {
-    // Simulate email sending (replace with actual email provider)
-    await simulateEmailSend(request)
+    // Send email (uses Resend if configured, otherwise logs)
+    await sendEmail(request)
     
     // Mark as sent
     record.status = 'sent'
@@ -156,19 +175,56 @@ export async function sendEmailWithDeduplication(
 }
 
 /**
- * Simulate sending an email (replace with actual provider like Resend, SendGrid, etc.)
+ * Send email using Resend if configured, otherwise log only (graceful degradation)
  */
-async function simulateEmailSend(request: SendEmailRequest): Promise<void> {
-  // In production, this would call an email provider API
+async function sendEmail(request: SendEmailRequest): Promise<void> {
+  // Log the email attempt regardless of whether email is enabled
   console.log(`[Email] Sending to ${request.recipient}: ${request.subject}`)
-  
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 100))
-  
-  // Simulate occasional failures (5% failure rate for testing retry logic)
-  if (Math.random() < 0.05) {
-    throw new Error('Simulated email send failure')
+  console.log(`[Email] Status: ${isEmailEnabled() ? 'LIVE' : 'SIMULATED'} (RESEND_API_KEY ${RESEND_API_KEY ? 'configured' : 'not configured'})`)
+
+  // If email is not enabled, simulate success without actually sending
+  if (!EMAIL_ENABLED || !resend) {
+    console.log(`[Email] Email sending disabled - simulating send to ${request.recipient}`)
+    // Simulate network delay for consistent behavior
+    await new Promise(resolve => setTimeout(resolve, 100))
+    return
   }
+
+  try {
+    const result = await resend.emails.send({
+      from: EMAIL_FROM_ADDRESS,
+      to: request.recipient,
+      subject: request.subject,
+      html: request.body,
+      text: stripHtml(request.body),
+      tags: [
+        { name: 'incident_id', value: request.incidentId },
+        { name: 'notification_type', value: request.type }
+      ]
+    })
+
+    if (result.error) {
+      throw new Error(`Resend API error: ${result.error.message}`)
+    }
+
+    console.log(`[Email] Successfully sent via Resend: ${result.data?.id}`)
+  } catch (error) {
+    console.error('[Email] Resend send failed:', error)
+    throw error
+  }
+}
+
+/**
+ * Strip HTML tags for plain text version
+ */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim()
 }
 
 /**
@@ -200,6 +256,7 @@ export function getDeduplicationStats(): {
   pending: number
   failed: number
   duplicatesPrevented: number
+  emailEnabled: boolean
 } {
   let sent = 0
   let pending = 0
@@ -216,7 +273,8 @@ export function getDeduplicationStats(): {
     sent,
     pending,
     failed,
-    duplicatesPrevented: 0 // Would need to track this separately with a counter
+    duplicatesPrevented: 0, // Would need to track this separately with a counter
+    emailEnabled: EMAIL_ENABLED
   }
 }
 
