@@ -366,7 +366,7 @@ export function EscalationSettingsForm({ initialRules, severityLevels }: Escalat
                           value={formData.trigger?.kind}
                           onValueChange={(value) => setFormData(prev => ({
                             ...prev,
-                            trigger: { ...prev.trigger, kind: value as 'time_since_started' | 'time_in_status' },
+                            trigger: { kind: value as 'time_since_started' | 'time_in_status', minutes: prev.trigger?.minutes ?? 15 },
                           }))}
                         >
                           <SelectTrigger>
@@ -386,7 +386,7 @@ export function EscalationSettingsForm({ initialRules, severityLevels }: Escalat
                           value={formData.trigger?.minutes}
                           onChange={(e) => setFormData(prev => ({
                             ...prev,
-                            trigger: { ...prev.trigger, minutes: parseInt(e.target.value) || 0 },
+                            trigger: { kind: prev.trigger?.kind ?? 'time_since_started', minutes: parseInt(e.target.value) || 0 },
                           }))}
                         />
                       </div>

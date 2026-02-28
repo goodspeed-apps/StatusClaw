@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { BrandingSettingsForm } from './branding-form'
+import { BrandingSettingsForm } from '../branding-form'
 import { brandingStore } from '@/lib/branding-store'
 
 export const metadata: Metadata = {
