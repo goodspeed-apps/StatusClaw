@@ -435,6 +435,75 @@ function generateHistory(): DailySpend[] {
 
 export const dailySpendHistory: DailySpend[] = generateHistory()
 
+// Incident types for timeline component
+export type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved"
+
+export interface IncidentUpdate {
+  id: string
+  incidentId: string
+  status: IncidentStatus
+  message: string
+  createdAt: string
+  createdBy: string
+}
+
+export interface Incident {
+  id: string
+  title: string
+  description: string
+  service: string
+  severity: "critical" | "high" | "medium" | "low"
+  status: IncidentStatus
+  startedAt: string
+  resolvedAt?: string
+  updates: IncidentUpdate[]
+}
+
+export interface TimelineStage {
+  status: IncidentStatus
+  label: string
+  startedAt: string
+  endedAt?: string
+  durationMs: number
+  updateCount: number
+  updates: IncidentUpdate[]
+}
+
+export interface IncidentTimeline {
+  incidentId: string
+  incident: Incident
+  stages: TimelineStage[]
+  totalDurationMs: number
+  isOngoing: boolean
+  currentStage: IncidentStatus | null
+}
+
+export const INCIDENT_STATUS_CONFIG: Record<
+  IncidentStatus,
+  { label: string; color: string; order: number }
+> = {
+  investigating: {
+    label: "Investigating",
+    color: "bg-yellow-500/20 text-yellow-600",
+    order: 0,
+  },
+  identified: {
+    label: "Identified",
+    color: "bg-orange-500/20 text-orange-600",
+    order: 1,
+  },
+  monitoring: {
+    label: "Monitoring",
+    color: "bg-blue-500/20 text-blue-600",
+    order: 2,
+  },
+  resolved: {
+    label: "Resolved",
+    color: "bg-green-500/20 text-green-600",
+    order: 3,
+  },
+}
+
 export const tasks: Task[] = [
   {
     id: "t1",
