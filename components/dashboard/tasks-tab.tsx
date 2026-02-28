@@ -6,8 +6,11 @@ import { fetchTasks } from "@/lib/data-service"
 import { KanbanBoard } from "./kanban-board"
 import { TaskListView } from "./task-list-view"
 import { TaskDetailModal } from "./task-detail-modal"
+import { CreateTaskModal } from "./create-task-modal"
 import { LastUpdatedBar } from "./last-updated-bar"
-import { LayoutGrid, List, Loader2 } from "lucide-react"
+import { useTaskShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { Button } from "@/components/ui/button"
+import { LayoutGrid, List, Loader2, Plus, Command } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function TasksTab() {
@@ -16,6 +19,7 @@ export function TasksTab() {
   const [view, setView] = useState<"kanban" | "list">("kanban")
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [createModalOpen, setCreateModalOpen] = useState(false)
 
   useEffect(() => {
     const loadData = async () => {
@@ -50,6 +54,21 @@ export function TasksTab() {
     setSelectedTask(updatedTask)
     setModalOpen(false)
   }, [])
+
+  const handleCreateTask = useCallback((newTask: Task) => {
+    setTasks((prev) => [newTask, ...prev])
+    setCreateModalOpen(false)
+  }, [])
+
+  // Setup keyboard shortcut for new task (cmd+n)
+  useTaskShortcuts({
+    onNewTask: () => {
+      if (!createModalOpen && !modalOpen) {
+        setCreateModalOpen(true)
+      }
+    },
+    modalOpen: createModalOpen || modalOpen,
+  })
 
   const taskCounts = {
     total: tasks.length,
@@ -93,6 +112,23 @@ export function TasksTab() {
             <span className="rounded-md bg-chart-2/10 px-2 py-0.5 text-[10px] font-semibold text-chart-2 font-mono">
               {taskCounts.done} done
             </span>
+          </div>
+        </div>
+
+        {/* New Task Button with Keyboard Shortcut */}
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setCreateModalOpen(true)}
+            size="sm"
+            className="gap-1.5 shadow-[0_0_10px_var(--glow-primary)]"
+          >
+            <Plus className="size-3.5" />
+            New Task
+          </Button>
+          <div className="hidden sm:flex items-center gap-1 text-[10px] text-muted-foreground/60">
+            <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px] flex items-center gap-0.5">
+              <Command className="size-2.5" />N
+            </kbd>
           </div>
         </div>
 
@@ -144,6 +180,13 @@ export function TasksTab() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         onSave={handleTaskSave}
+      />
+
+      {/* Create Task Modal */}
+      <CreateTaskModal
+        open={createModalOpen}
+        onOpenChange={setCreateModalOpen}
+        onCreate={handleCreateTask}
       />
     </div>
   )

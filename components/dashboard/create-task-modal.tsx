@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useTaskShortcuts } from "@/hooks/use-keyboard-shortcuts"
-import { Calendar, User, Tag, Flag, ArrowRight, Save, DollarSign, Clock, Command } from "lucide-react"
+import { User, Tag, Flag, ArrowRight, Save, Command, X } from "lucide-react"
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; className: string }> = {
   low: { label: "Low", className: "bg-muted-foreground/15 text-muted-foreground" },
@@ -29,88 +29,107 @@ const PRIORITY_CONFIG: Record<TaskPriority, { label: string; className: string }
   critical: { label: "Critical", className: "bg-destructive/15 text-destructive-foreground" },
 }
 
-interface TaskDetailModalProps {
-  task: Task | null
+const DEFAULT_TAGS = ["engineering", "ai", "marketing", "security", "design", "research", "testing", "product"]
+
+interface CreateTaskModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (task: Task) => void
+  onCreate: (task: Task) => void
 }
 
-export function TaskDetailModal({
-  task,
+interface NewTaskForm {
+  title: string
+  description: string
+  status: TaskStatus
+  priority: TaskPriority
+  assignee: string
+  tags: string[]
+}
+
+export function CreateTaskModal({
   open,
   onOpenChange,
-  onSave,
-}: TaskDetailModalProps) {
-  const [editedTask, setEditedTask] = useState<Task | null>(null)
+  onCreate,
+}: CreateTaskModalProps) {
+  const [form, setForm] = useState<NewTaskForm>({
+    title: "",
+    description: "",
+    status: "backlog",
+    priority: "medium",
+    assignee: agents[0]?.name || "",
+    tags: [],
+  })
 
-  const currentTask = editedTask ?? task
-  const hasChanges = editedTask !== null
+  const statusConfig = TASK_STATUS_CONFIG[form.status]
+  const priorityConfig = PRIORITY_CONFIG[form.priority]
+  const isValid = form.title.trim().length > 0
+
+  const handleCreate = () => {
+    if (!isValid) return
+
+    const newTask: Task = {
+      id: `t${Date.now()}`,
+      title: form.title.trim(),
+      description: form.description.trim(),
+      status: form.status,
+      priority: form.priority,
+      assignee: form.assignee,
+      createdAt: new Date().toISOString().split("T")[0],
+      tags: form.tags,
+      cost: 0,
+      lastActivity: new Date().toISOString(),
+    }
+
+    onCreate(newTask)
+    // Reset form
+    setForm({
+      title: "",
+      description: "",
+      status: "backlog",
+      priority: "medium",
+      assignee: agents[0]?.name || "",
+      tags: [],
+    })
+  }
 
   // Setup keyboard shortcuts
   useTaskShortcuts({
     onSaveTask: () => {
-      if (hasChanges && currentTask) {
-        onSave(currentTask)
-        setEditedTask(null)
+      if (isValid && open) {
+        handleCreate()
       }
     },
     onCancel: () => {
-      setEditedTask(null)
-      onOpenChange(false)
+      if (open) {
+        onOpenChange(false)
+      }
     },
-    canSave: hasChanges,
+    canSave: isValid,
     modalOpen: open,
   })
 
-  if (!currentTask) return null
-
-  const statusConfig = TASK_STATUS_CONFIG[currentTask.status]
-  const priorityConfig = PRIORITY_CONFIG[currentTask.priority]
-
-  const handleStatusChange = (value: string) => {
-    setEditedTask({ ...(editedTask ?? task!), status: value as TaskStatus })
-  }
-
-  const handlePriorityChange = (value: string) => {
-    setEditedTask({ ...(editedTask ?? task!), priority: value as TaskPriority })
-  }
-
-  const handleAssigneeChange = (value: string) => {
-    setEditedTask({ ...(editedTask ?? task!), assignee: value })
-  }
-
-  const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setEditedTask({ ...(editedTask ?? task!), description: e.target.value })
-  }
-
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setEditedTask({ ...(editedTask ?? task!), title: e.target.value })
-  }
-
-  const handleSave = () => {
-    if (editedTask) {
-      onSave(editedTask)
-      setEditedTask(null)
-    }
-  }
-
-  const handleClose = (isOpen: boolean) => {
-    if (!isOpen) setEditedTask(null)
-    onOpenChange(isOpen)
+  const toggleTag = (tag: string) => {
+    setForm((prev) => ({
+      ...prev,
+      tags: prev.tags.includes(tag)
+        ? prev.tags.filter((t) => t !== tag)
+        : [...prev.tags, tag],
+    }))
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg border-border bg-card shadow-[0_0_30px_var(--glow-primary)]">
         <DialogHeader>
-          <DialogTitle className="sr-only">Task Details</DialogTitle>
+          <DialogTitle className="sr-only">Create New Task</DialogTitle>
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
               <input
-                value={currentTask.title}
-                onChange={handleTitleChange}
-                className="w-full bg-transparent text-lg font-bold text-foreground outline-none border-b border-transparent focus:border-primary/40 transition-colors pb-1"
+                placeholder="Task title..."
+                value={form.title}
+                onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+                className="w-full bg-transparent text-lg font-bold text-foreground outline-none border-b border-transparent focus:border-primary/40 transition-colors pb-1 placeholder:text-muted-foreground/50"
+                autoFocus
               />
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Badge
@@ -125,10 +144,6 @@ export function TaskDetailModal({
                 >
                   {priorityConfig.label}
                 </Badge>
-                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <Calendar className="size-3" />
-                  <span className="font-mono">{currentTask.createdAt}</span>
-                </span>
               </div>
             </div>
           </div>
@@ -140,10 +155,11 @@ export function TaskDetailModal({
             Description
           </label>
           <textarea
-            value={currentTask.description}
-            onChange={handleDescriptionChange}
+            placeholder="What needs to be done?"
+            value={form.description}
+            onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
             rows={3}
-            className="w-full rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition-all resize-none leading-relaxed"
+            className="w-full rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition-all resize-none leading-relaxed placeholder:text-muted-foreground/50"
           />
         </div>
 
@@ -156,8 +172,8 @@ export function TaskDetailModal({
               Status
             </label>
             <Select
-              value={currentTask.status}
-              onValueChange={handleStatusChange}
+              value={form.status}
+              onValueChange={(value) => setForm((prev) => ({ ...prev, status: value as TaskStatus }))}
             >
               <SelectTrigger className="h-8 w-full text-xs bg-secondary/30">
                 <SelectValue />
@@ -179,8 +195,8 @@ export function TaskDetailModal({
               Priority
             </label>
             <Select
-              value={currentTask.priority}
-              onValueChange={handlePriorityChange}
+              value={form.priority}
+              onValueChange={(value) => setForm((prev) => ({ ...prev, priority: value as TaskPriority }))}
             >
               <SelectTrigger className="h-8 w-full text-xs bg-secondary/30">
                 <SelectValue />
@@ -202,8 +218,8 @@ export function TaskDetailModal({
               Assignee
             </label>
             <Select
-              value={currentTask.assignee}
-              onValueChange={handleAssigneeChange}
+              value={form.assignee}
+              onValueChange={(value) => setForm((prev) => ({ ...prev, assignee: value }))}
             >
               <SelectTrigger className="h-8 w-full text-xs bg-secondary/30">
                 <SelectValue />
@@ -219,30 +235,6 @@ export function TaskDetailModal({
           </div>
         </div>
 
-        {/* Cost & Last Activity */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-              <DollarSign className="size-3" />
-              Cost
-            </div>
-            <p className="font-mono text-sm font-semibold text-foreground">
-              ${currentTask.cost.toFixed(2)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-              <Clock className="size-3" />
-              Last Activity
-            </div>
-            <p className="font-mono text-sm font-semibold text-foreground">
-              {new Date(currentTask.lastActivity).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              {" "}
-              {new Date(currentTask.lastActivity).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
-            </p>
-          </div>
-        </div>
-
         {/* Tags */}
         <div>
           <label className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -250,41 +242,58 @@ export function TaskDetailModal({
             Tags
           </label>
           <div className="flex flex-wrap gap-1.5">
-            {currentTask.tags.map((tag) => (
-              <span
+            {DEFAULT_TAGS.map((tag) => (
+              <button
                 key={tag}
-                className="rounded-md bg-secondary/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                type="button"
+                onClick={() => toggleTag(tag)}
+                className={cn(
+                  "rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer",
+                  form.tags.includes(tag)
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary/60 text-muted-foreground hover:bg-secondary"
+                )}
               >
                 {tag}
-              </span>
+              </button>
             ))}
           </div>
         </div>
 
-        {/* Save Button with Keyboard Shortcut Hint */}
-        {hasChanges && (
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-              <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px] flex items-center gap-0.5">
-                <Command className="size-2.5" />S
-              </kbd>
-              <span>to save</span>
-              <span className="mx-1">·</span>
-              <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px]">
-                Esc
-              </kbd>
-              <span>to cancel</span>
-            </div>
+        {/* Actions with Keyboard Shortcut Hints */}
+        <div className="flex items-center justify-between pt-2 border-t border-border">
+          <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+            <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px] flex items-center gap-0.5">
+              <Command className="size-2.5" />S
+            </kbd>
+            <span>to save</span>
+            <span className="mx-1">·</span>
+            <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[9px]">
+              Esc
+            </kbd>
+            <span>to cancel</span>
+          </div>
+          <div className="flex items-center gap-2">
             <Button
-              onClick={handleSave}
+              onClick={() => onOpenChange(false)}
+              variant="ghost"
+              size="sm"
+              className="gap-1.5"
+            >
+              <X className="size-3.5" />
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={!isValid}
               size="sm"
               className="gap-1.5 shadow-[0_0_10px_var(--glow-primary)]"
             >
               <Save className="size-3.5" />
-              Save Changes
+              Create Task
             </Button>
           </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   )
