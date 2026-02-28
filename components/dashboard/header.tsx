@@ -1,9 +1,10 @@
 "use client"
 
 import { useTheme } from "next-themes"
-import { Moon, Sun, RefreshCw } from "lucide-react"
+import { Moon, Sun, RefreshCw, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
+import Link from "next/link"
 import { useEffect, useState, useCallback } from "react"
 
 export function DashboardHeader() {
@@ -83,7 +84,19 @@ export function DashboardHeader() {
         >
           <RefreshCw className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} />
         </Button>
-        
+
+        {/* Settings Link */}
+        <Link href="/settings">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative h-9 w-9 rounded-lg"
+            aria-label="Settings"
+          >
+            <Settings className="size-4" />
+          </Button>
+        </Link>
+
         {mounted && (
           <Button
             variant="ghost"
