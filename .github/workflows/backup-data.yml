@@ -1,0 +1,249 @@
+name: Data Backup
+
+on:
+  schedule:
+    # Run every 4 hours for git backups
+    - cron: '0 */4 * * *'
+    # Daily at 06:00 UTC for external backups
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      backup_type:
+        description: 'Backup type'
+        required: true
+        default: 'git'
+        type: choice
+        options:
+          - git
+          - external
+          - both
+
+jobs:
+  # Job 1: Git-based backup (commits data changes to repo)
+  git-backup:
+    if: github.event.schedule == '0 */4 * * *' || github.event.inputs.backup_type == 'git' || github.event.inputs.backup_type == 'both'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for data changes
+        id: check_changes
+        run: |
+          if [ -n "$(git status --porcelain data/)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Data changes detected"
+            git status --short data/
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No data changes to backup"
+          fi
+
+      - name: Validate JSON files
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          echo "Validating JSON files..."
+          for file in data/*.json; do
+            if [ -f "$file" ]; then
+              echo "Checking $file..."
+              jq '.' "$file" > /dev/null || {
+                echo "ERROR: $file is not valid JSON"
+                exit 1
+              }
+            fi
+          done
+          echo "All JSON files are valid"
+
+      - name: Commit and push data changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "backup@statusclaw.io"
+          git config --local user.name "StatusClaw Backup Bot"
+          
+          TIMESTAMP=$(date -u +%Y-%m-%d-%H%M%S)
+          BACKUP_TAG="backup-${TIMESTAMP}"
+          
+          git add data/
+          git commit -m "backup: auto-sync data [skip ci]
+
+          - Timestamp: ${TIMESTAMP}
+          - Trigger: scheduled backup
+          - Workflow: ${{ github.workflow }}"
+          
+          git tag "${BACKUP_TAG}"
+          git push origin main
+          git push origin "${BACKUP_TAG}"
+          
+          echo "✅ Backup completed: ${BACKUP_TAG}"
+
+      - name: Create backup summary
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          echo "## Backup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type**: Git commit + tag" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: backup-$(date -u +%Y-%m-%d-%H%M%S)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files changed**:" >> $GITHUB_STEP_SUMMARY
+          git diff --name-only HEAD~1 HEAD | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+
+  # Job 2: External backup (S3/R2 archive)
+  external-backup:
+    if: github.event.schedule == '0 6 * * *' || github.event.inputs.backup_type == 'external' || github.event.inputs.backup_type == 'both'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify data files exist
+        run: |
+          if [ ! -d "data" ]; then
+            echo "ERROR: data directory not found"
+            exit 1
+          fi
+          if [ ! -f "data/incidents.json" ]; then
+            echo "WARNING: incidents.json not found"
+          fi
+          echo "Data files verified"
+
+      - name: Create backup archive
+        run: |
+          TIMESTAMP=$(date -u +%Y-%m-%d)
+          BACKUP_NAME="statusclaw-data-${TIMESTAMP}"
+          
+          # Create archive
+          tar -czf "${BACKUP_NAME}.tar.gz" data/
+          
+          # Generate checksum
+          sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.tar.gz.sha256"
+          
+          # List contents
+          echo "Backup created:"
+          ls -lh "${BACKUP_NAME}.tar.gz"
+          ls -lh "${BACKUP_NAME}.tar.gz.sha256"
+          
+          echo "backup_name=${BACKUP_NAME}" >> $GITHUB_ENV
+
+      - name: Upload to S3/R2 (if configured)
+        if: env.BACKUP_S3_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+        run: |
+          # Configure AWS CLI for R2 if endpoint is provided
+          if [ -n "$BACKUP_S3_ENDPOINT" ]; then
+            aws configure set default.s3.endpoint_url "$BACKUP_S3_ENDPOINT"
+            aws configure set default.s3.signature_version s3v4
+          fi
+          
+          # Upload backup
+          aws s3 cp "${backup_name}.tar.gz" "s3://${BACKUP_S3_BUCKET}/statusclaw/"
+          aws s3 cp "${backup_name}.tar.gz.sha256" "s3://${BACKUP_S3_BUCKET}/statusclaw/"
+          
+          echo "✅ Uploaded to S3: s3://${BACKUP_S3_BUCKET}/statusclaw/${backup_name}.tar.gz"
+
+      - name: Cleanup old backups (keep 30 days)
+        if: env.BACKUP_S3_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+        run: |
+          if [ -n "$BACKUP_S3_ENDPOINT" ]; then
+            aws configure set default.s3.endpoint_url "$BACKUP_S3_ENDPOINT"
+          fi
+          
+          # List and delete backups older than 30 days
+          aws s3 ls "s3://${BACKUP_S3_BUCKET}/statusclaw/" | \
+            awk '{print $4}' | \
+            while read file; do
+              # Extract date from filename (statusclaw-data-YYYY-MM-DD.tar.gz)
+              file_date=$(echo "$file" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
+              if [ -n "$file_date" ]; then
+                file_epoch=$(date -d "$file_date" +%s 2>/dev/null || echo 0)
+                cutoff_epoch=$(date -d '30 days ago' +%s)
+                
+                if [ "$file_epoch" -lt "$cutoff_epoch" ]; then
+                  echo "Deleting old backup: $file"
+                  aws s3 rm "s3://${BACKUP_S3_BUCKET}/statusclaw/$file"
+                fi
+              fi
+            done
+
+      - name: Store backup as artifact (fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: statusclaw-backup-${{ env.backup_name || 'latest' }}
+          path: |
+            statusclaw-data-*.tar.gz
+            statusclaw-data-*.tar.gz.sha256
+          retention-days: 30
+
+      - name: Create backup summary
+        run: |
+          echo "## External Backup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type**: Archive upload" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Archive**: ${backup_name}.tar.gz" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ secrets.BACKUP_S3_BUCKET }}" ]; then
+            echo "- **Destination**: s3://${{ secrets.BACKUP_S3_BUCKET }}/statusclaw/" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Destination**: GitHub Actions artifact (S3 not configured)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Job 3: Verify backup integrity
+  verify-backup:
+    needs: [git-backup, external-backup]
+    if: always() && (needs.git-backup.result == 'success' || needs.external-backup.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify data integrity
+        run: |
+          echo "Running data integrity checks..."
+          
+          # Check incidents.json
+          if [ -f "data/incidents.json" ]; then
+            # Validate JSON
+            jq '.' data/incidents.json > /dev/null || {
+              echo "ERROR: incidents.json is corrupted"
+              exit 1
+            }
+            
+            # Check required fields
+            missing_fields=$(jq '.incidents[] | select(.id == null or .title == null or .status == null) | .id' data/incidents.json)
+            if [ -n "$missing_fields" ]; then
+              echo "WARNING: Some incidents missing required fields"
+              echo "$missing_fields"
+            fi
+            
+            # Count incidents
+            incident_count=$(jq '.incidents | length' data/incidents.json)
+            echo "✅ incidents.json: $incident_count incidents"
+          fi
+          
+          # Check branding.json
+          if [ -f "data/branding.json" ]; then
+            jq '.' data/branding.json > /dev/null || {
+              echo "ERROR: branding.json is corrupted"
+              exit 1
+            }
+            echo "✅ branding.json: Valid"
+          fi
+          
+          echo "All integrity checks passed!"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "🚨 BACKUP VERIFICATION FAILED"
+          echo "Check the workflow logs for details"
+          # Could add Slack/Discord notification here
