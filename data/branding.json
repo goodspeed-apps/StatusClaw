@@ -1,0 +1,11 @@
+{
+  "orgName": "StatusClaw",
+  "theme": {
+    "primary": "#4f46e5",
+    "accent": "#10b981",
+    "radiusPx": 10,
+    "mode": "system",
+    "scope": "status_only"
+  },
+  "updatedAt": "2026-02-28T09:21:47.044Z"
+}
