@@ -1,0 +1,3795 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===========================================
+// AUTH MODELS (NextAuth.js)
+// ===========================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+
+  // Stripe
+  stripeCustomerId String? @unique
+
+  // User preferences
+  timezone String @default("America/New_York") // IANA timezone for digest delivery
+
+  // Account deletion: set when user schedules deletion (after all owned workspace subs set to cancel)
+  scheduledAccountDeletionAt DateTime?
+
+  accounts               Account[]
+  sessions               Session[]
+  projects               Project[]
+  passwordResetTokens    PasswordResetToken[]
+  subscriptions          Subscription[]
+  submissionNotes        SubmissionNote[]
+  savedViews             SavedView[]
+  slackWorkspaces        SlackWorkspace[]
+  teamsWorkspaces        TeamsWorkspace[]
+  issueComments          IssueComment[]
+  jiraConnection         JiraConnection?
+  linearConnection       LinearConnection?
+  hubSpotConnection      HubSpotConnection?
+  salesforceConnection   SalesforceConnection?
+  notionConnection       NotionConnection?
+  googleSheetsConnection GoogleSheetsConnection?
+  zendeskConnection      ZendeskConnection?
+  intercomConnection     IntercomConnection?
+  airtableConnection     AirtableConnection?
+  confluenceConnection   ConfluenceConnection?
+  gitlabConnection       GitLabConnection?
+  pipedreamConnection    PipedreamConnection?
+  azureDevOpsConnection  AzureDevOpsConnection?
+  trelloConnection       TrelloConnection?
+  asanaConnection        AsanaConnection?
+  clickupConnection      ClickUpConnection?
+  freshdeskConnection    FreshdeskConnection?
+  codaConnection         CodaConnection?
+  bigqueryConnection     BigQueryConnection?
+  snowflakeConnection    SnowflakeConnection?
+  mondayConnection       MondayConnection?
+  pagerDutyConnection    PagerDutyConnection?
+  statuspageConnection   StatuspageConnection?
+  integrationHealth      IntegrationHealth[]
+  workspaceMemberships   WorkspaceMembership[]
+  userRoles              UserRole[]
+  workspaceInvitesSent   WorkspaceInvite[]       @relation("invitedBy")
+  assignedActions        Action[]                @relation("ActionAssignee")
+  createdActions         Action[]                @relation("ActionCreatedBy")
+  actionComments         ActionComment[]
+  actionDecisions        ActionDecision[]        @relation("ActionDecisionDecidedBy")
+  submissionActionLinks  SubmissionActionLink[]  @relation("SubmissionActionLinkLinkedBy")
+  labelFeedback          LabelFeedback[]
+  backfillJobs           BackfillJob[]
+  workspaceLabelRules    WorkspaceLabelRule[]
+  insightFeedback        InsightFeedback[]
+  ideaVotes              IdeaVote[]
+  ideaComments           IdeaComment[]
+  hiddenSubmissions      Submission[]    @relation("SubmissionHiddenBy")
+  hiddenIdeaComments     IdeaComment[]   @relation("IdeaCommentHiddenBy")
+  teamMemberships        TeamMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ===========================================
+// BILLING / SUBSCRIPTIONS
+// ===========================================
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSubscriptionId String   @unique
+  stripeCustomerId     String
+  stripePriceId        String
+  status               String // active, trialing, past_due, canceled, unpaid, incomplete, incomplete_expired, paused
+  cancelAtPeriodEnd    Boolean  @default(false)
+  currentPeriodEnd     DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([stripeCustomerId])
+}
+
+// ===========================================
+// APP MODELS
+// ===========================================
+
+model Project {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  // Form type (FORM_TYPES_CANON internal ID); schema profile = NPS|CSAT|CES|PMF; blueprint = optional
+  formType     String  @default("launcher")
+  schemaProfile String?
+  blueprintId   String?
+
+  // Widget configuration
+  widgetPosition    String @default("bottom-right")
+  widgetTheme       String @default("auto")
+  widgetAccentColor String @default("#0891b2")
+
+  // Targeting + frequency caps (Phase 1): URL rules, segment rules, max N per user per day/session
+  targetingConfig Json? // { urlRules?: { include?: string[], exclude?: string[] }, frequencyCap?: { maxPerUserPerDay?: number, maxPerUserPerSession?: number } }
+
+  // Install verification
+  isInstalled    Boolean   @default(false)
+  installedAt    DateTime?
+  allowedOrigins String[]  @default([])
+
+  // Owner (legacy - for migration)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Workspace (new multi-tenant model)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Relations
+  responses             Response[]
+  widget                Widget?
+  notificationSettings  ProjectNotificationSettings?
+  tags                  Tag[]
+  savedViews            SavedView[]
+  slackSettings         ProjectSlackSettings?
+  slackDeliveryLogs     SlackDeliveryLog[]
+  issues                Issue[]
+  canonicalIssues       CanonicalIssue[]
+  jiraSettings          JiraProjectSettings?
+  linearSettings        LinearProjectSettings?
+  hubSpotSettings       HubSpotProjectSettings?
+  salesforceSettings    SalesforceProjectSettings?
+  notionSettings        NotionProjectSettings?
+  googleSheetsSettings  GoogleSheetsProjectSettings?
+  zendeskSettings       ZendeskProjectSettings?
+  intercomSettings      IntercomProjectSettings?
+  airtableSettings      AirtableProjectSettings?
+  confluenceSettings    ConfluenceProjectSettings?
+  gitlabSettings        GitLabProjectSettings?
+  azureDevOpsSettings   AzureDevOpsProjectSettings?
+  trelloSettings        TrelloProjectSettings?
+  asanaSettings         AsanaProjectSettings?
+  clickUpSettings       ClickUpProjectSettings?
+  codaSettings          CodaProjectSettings?
+  bigqueryDestination   BigQueryDestination?
+  snowflakeDestination  SnowflakeDestination?
+  mondaySettings        MondayProjectSettings?
+  pagerDutySettings     PagerDutyProjectSettings?
+  statuspageSettings    StatuspageProjectSettings?
+  warehouseExportStates WarehouseExportState[]
+  warehouseDeliveryLogs WarehouseDeliveryLog[]
+  zapierWebhook         ZapierWebhook?
+  zapierDeliveryLogs    ZapierDeliveryLog[]
+  routes                ProjectRoute[]
+  routeDeliveryLogs     RouteDeliveryLog[]
+  digestSettings        ProjectDigestSettings?
+
+  // Insights system
+  insightStates InsightFormState[]
+  insightRuns   InsightRun[]
+  insightCards  InsightCard[]
+
+  // Migration flag
+  routingMigrated Boolean @default(false)
+
+  // Evidence defaults (Spec §3 — per-form evidence configuration)
+  evidenceDefaultMode          String  @default("off") // 'off'|'basic'|'advanced'
+  evidenceAdvancedAllowed      Boolean @default(false)
+  evidenceRetentionDaysOverride Int? // null = use workspace default
+  consentCopyVersion           String  @default("v1")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+}
+
+// ===========================================
+// WORKFLOW ENUMS
+// ===========================================
+
+enum SubmissionStatus {
+  NEW
+  TRIAGED
+  IN_PROGRESS
+  DONE
+  ARCHIVED
+}
+
+// ===========================================
+// PROJECT NOTIFICATION SETTINGS
+// ===========================================
+
+enum NotificationMode {
+  OFF
+  DAILY
+  INSTANT
+}
+
+model ProjectNotificationSettings {
+  id               String           @id @default(cuid())
+  projectId        String           @unique
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mode             NotificationMode @default(OFF)
+  lastDigestSentAt DateTime? // Last time we sent a digest for this project
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mode])
+}
+
+model Widget {
+  id         String  @id @default(cuid())
+  projectId  String  @unique
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  widgetId   String  @unique // Public identifier for embedding (wid_xxxx)
+  widgetType String  @default("launcher") // "launcher" | "modal_trigger" | "inline_form" | "inline_thumbs" | "inline_emoji" | "inline_poll"
+
+  // Active config version (nullable for legacy widgets; bootstrap on first access)
+  activeConfigVersionId String?
+  activeConfigVersion   WidgetConfigVersion? @relation("ActiveConfig", fields: [activeConfigVersionId], references: [id])
+
+  // Relations
+  submissions    Submission[]
+  configVersions WidgetConfigVersion[] @relation("WidgetVersions")
+  experiment     WidgetExperiment?
+  events         WidgetEvent[]
+  emailCampaigns EmailCampaign[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// WIDGET CONFIG VERSIONING
+// ===========================================
+
+model WidgetConfigVersion {
+  id         String @id @default(cuid())
+  widgetDbId String
+  widget     Widget @relation("WidgetVersions", fields: [widgetDbId], references: [id], onDelete: Cascade)
+  version    Int // Monotonic per widget, starts at 1
+  config     Json // Full WidgetConfig JSON
+
+  // Reverse relation for active config
+  activeForWidget Widget[] @relation("ActiveConfig")
+
+  // Track which submissions used this version
+  submissions Submission[]
+  events      WidgetEvent[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([widgetDbId, version])
+  @@index([widgetDbId])
+}
+
+// ===========================================
+// A/B TESTING
+// ===========================================
+
+model WidgetExperiment {
+  id                String  @id @default(cuid())
+  widgetDbId        String  @unique
+  widget            Widget  @relation(fields: [widgetDbId], references: [id], onDelete: Cascade)
+  enabled           Boolean @default(false)
+  trafficSplitB     Int     @default(50) // 0-100, percentage for variant B
+  variantBOverrides Json? // Partial config overrides for variant B
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// WIDGET EVENTS (Analytics)
+// ===========================================
+
+model WidgetEvent {
+  id              String               @id @default(cuid())
+  widgetDbId      String
+  widget          Widget               @relation(fields: [widgetDbId], references: [id], onDelete: Cascade)
+  type            String // "impression" | "open" | "submit"
+  variant         String? // "A" | "B"
+  configVersionId String?
+  configVersion   WidgetConfigVersion? @relation(fields: [configVersionId], references: [id], onDelete: SetNull)
+
+  // Metadata
+  pageUrl   String?
+  referrer  String?
+  userAgent String?
+  ipHash    String? // SHA256 hash only, never raw IP
+  eventMetadata Json? // targeting_context, frequency_cap_metadata, utm_*, device_type, locale, timezone
+
+  createdAt DateTime @default(now())
+
+  @@index([widgetDbId])
+  @@index([widgetDbId, createdAt])
+  @@index([widgetDbId, type, createdAt])
+  @@index([widgetDbId, variant, createdAt])
+}
+
+// ===========================================
+// EMAIL CAMPAIGNS (P3-05)
+// ===========================================
+
+model EmailCampaign {
+  id        String @id @default(cuid())
+  widgetId  String
+  widget    Widget @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+
+  // Campaign details
+  name        String
+  subject     String
+  senderName  String?
+  preheader   String? // Preview text in inbox
+  contentHtml String  @db.Text
+  contentText String? @db.Text
+  ctaUrl      String? // Feedback form URL (hosted or deep link)
+  ctaText     String  @default("Give Feedback")
+
+  // Audience (JSON array of {email, name?, metadata?})
+  audienceJson  Json @default("[]")
+  audienceCount Int  @default(0)
+
+  // Status: draft | scheduled | sending | sent | cancelled
+  status      String    @default("draft")
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  cancelledAt DateTime?
+
+  // Stats (cached for fast reads)
+  totalSent      Int @default(0)
+  totalDelivered Int @default(0)
+  totalBounced   Int @default(0)
+  totalOpened    Int @default(0)
+  totalClicked   Int @default(0)
+
+  // Relations
+  deliveries EmailDelivery[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([widgetId])
+  @@index([widgetId, status])
+  @@index([status, scheduledAt])
+}
+
+model EmailDelivery {
+  id            String        @id @default(cuid())
+  campaignId    String
+  campaign      EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  // Recipient
+  recipientEmail    String
+  recipientName     String?
+  recipientMetadata Json? // Custom fields from CSV
+
+  // Status: pending | sent | delivered | bounced | failed
+  status        String    @default("pending")
+  externalId    String? // Resend message ID
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  bouncedAt     DateTime?
+  bounceReason  String?
+  failedAt      DateTime?
+  failureReason String?
+
+  // Engagement
+  openedAt   DateTime?
+  openCount  Int       @default(0)
+  clickedAt  DateTime?
+  clickCount Int       @default(0)
+
+  // Link to submission if recipient submitted feedback
+  submissionId String?
+  submission   Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  // Relations
+  clickTracks EmailClickTrack[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([campaignId, recipientEmail])
+  @@index([campaignId])
+  @@index([campaignId, status])
+  @@index([recipientEmail])
+  @@index([externalId])
+}
+
+model EmailClickTrack {
+  id             String        @id @default(cuid())
+  deliveryId     String
+  delivery       EmailDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  token          String        @unique // Unique token for click tracking
+  destinationUrl String
+  clickedAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([deliveryId])
+}
+
+// ===========================================
+// WIDGET SUBMISSIONS
+// ===========================================
+
+model Submission {
+  id String @id @default(cuid())
+
+  // Relations
+  widgetId String
+  widget   Widget @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+
+  // A/B test tracking
+  variant         String? // "A" | "B"
+  configVersionId String?
+  configVersion   WidgetConfigVersion? @relation(fields: [configVersionId], references: [id], onDelete: SetNull)
+
+  // Content (legacy single-step fields, kept for backward compat)
+  message String // Required, max ~2000 chars
+  email   String? // Optional contact email
+
+  // Multi-step flow data (Widget Studio v1+)
+  answers Json? // Map of blockId -> value { "block_abc": "Hello world", "block_email": "user@example.com" }
+  path    Json? // Array of { nodeId: string, enteredAt: number }
+  context Json? // Optional metadata { pageUrl, referrer, userAgent, ... }
+
+  // Metadata
+  pageUrl   String? // Where the submission was made
+  referrer  String? // HTTP referrer
+  userAgent String? // Browser user agent
+  ipHash    String? // SHA256 hash of IP for abuse detection (never store raw IP)
+
+  // Read/unread state (submissions list behavior)
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  // Workflow status
+  status          SubmissionStatus @default(NEW)
+  statusUpdatedAt DateTime?
+
+  // First-occurrence timestamps for workflow timing analytics
+  triagedAt  DateTime? // Set once when status first becomes TRIAGED
+  doneAt     DateTime? // Set once when status first becomes DONE
+  archivedAt DateTime? // Set once when status first becomes ARCHIVED
+
+  // Free tier soft-locking (now workspace-scoped)
+  isLocked     Boolean   @default(false)
+  lockedReason String? // "over_cap" | "free_limit" (legacy)
+  lockedAt     DateTime?
+
+  // Notification tracking
+  instantNotifiedAt DateTime? // When instant notification was sent
+  digestNotifiedAt  DateTime? // When included in a digest
+
+  // AI labeling: cached labels JSON for fast render (§2)
+  labelsJson Json?
+
+  // Similarity: embedding vector (array of floats) for duplicate detection (§7)
+  embeddingJson Json?
+
+  // Portal voting (P3-04)
+  voteCount      Int       @default(0)
+  displayTitle   String?   // Extracted title for portal display
+  mergedIntoId   String?
+  mergedInto     Submission?  @relation("SubmissionMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom     Submission[] @relation("SubmissionMerge")
+  isHidden       Boolean   @default(false)
+  hiddenAt       DateTime?
+  hiddenByUserId String?
+  hiddenByUser   User?     @relation("SubmissionHiddenBy", fields: [hiddenByUserId], references: [id], onDelete: SetNull)
+
+  // Evidence consent (Spec §4 — Phase 1: stored without actual capture)
+  evidenceModeSelected String? // 'off'|'basic'|'advanced' as selected by end-user
+  consentCopyVersion   String? // version of consent copy shown at submission time
+
+  // AI Triage (Spec §7)
+  triageStatus  String?   // 'pending'|'running'|'completed'|'failed'
+  triageOutput  Json?     // Structured triage output matching Section 7 schema
+  triageVersion String?   // e.g. 'v1'
+  triageRanAt   DateTime?
+
+  // Relations
+  notes                 SubmissionNote[]
+  tags                  SubmissionTag[]
+  issueLinks            IssueSubmission[]
+  actionLinks           SubmissionActionLink[]
+  actionRecommendations SubmissionActionRecommendation[]
+  labels                SubmissionLabel[]
+  labelRuns             SubmissionLabelRun[]
+  labelFeedback         LabelFeedback[]
+  similarity            SubmissionSimilarity[]
+  votes                 IdeaVote[]
+  comments              IdeaComment[]
+  emailDeliveries       EmailDelivery[]
+  fixPackets            FixPacket[]
+  sessionArtifact       SessionArtifact?
+  issueOccurrence       IssueOccurrence?
+
+  createdAt DateTime @default(now())
+
+  @@index([widgetId])
+  @@index([widgetId, createdAt])
+  @@index([widgetId, isLocked, createdAt])
+  @@index([widgetId, isRead, createdAt])
+  @@index([widgetId, digestNotifiedAt, createdAt])
+  @@index([widgetId, status, createdAt])
+  @@index([widgetId, isRead, status, createdAt])
+  @@index([widgetId, triagedAt])
+  @@index([widgetId, doneAt])
+  @@index([mergedIntoId])
+  @@index([widgetId, isHidden, voteCount(sort: Desc)])
+}
+
+// ===========================================
+// SUBMISSION NOTES (Internal thread)
+// ===========================================
+
+model SubmissionNote {
+  id           String     @id @default(cuid())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body         String // max 4000 chars
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([submissionId, createdAt])
+}
+
+// ===========================================
+// PORTAL VOTING (P3-04)
+// ===========================================
+
+model IdeaVote {
+  id               String     @id @default(cuid())
+  submissionId     String
+  submission       Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  direction        Int        @default(1) // 1 = upvote, -1 = downvote
+  voterFingerprint String?    // For anonymous voting (hashed browser fingerprint)
+  userId           String?    // For authenticated voting
+  user             User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([submissionId, voterFingerprint])
+  @@unique([submissionId, userId])
+  @@index([submissionId])
+}
+
+model IdeaComment {
+  id              String        @id @default(cuid())
+  submissionId    String
+  submission      Submission    @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  parentCommentId String?
+  parent          IdeaComment?  @relation("CommentThread", fields: [parentCommentId], references: [id], onDelete: SetNull)
+  replies         IdeaComment[] @relation("CommentThread")
+  body            String        // Comment content
+  authorName      String?       // For anonymous comments
+  authorEmail     String?       // Optional for anonymous
+  userId          String?       // For authenticated comments
+  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  isHidden        Boolean       @default(false)
+  hiddenAt        DateTime?
+  hiddenByUserId  String?
+  hiddenByUser    User?         @relation("IdeaCommentHiddenBy", fields: [hiddenByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([submissionId, createdAt])
+  @@index([parentCommentId])
+}
+
+model Response {
+  id String @id @default(cuid())
+
+  // Feedback content
+  content String
+  rating  Int?
+
+  // Metadata
+  email     String?
+  page      String?
+  userAgent String?
+
+  // Project relation
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+}
+
+// ===========================================
+// TAGS (Project-scoped, Pro-only)
+// ===========================================
+
+model Tag {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  color     String? // Hex color like "#FFB020" or token
+
+  submissions SubmissionTag[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, name])
+  @@index([projectId])
+}
+
+model SubmissionTag {
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  tagId        String
+  tag          Tag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([submissionId, tagId])
+  @@index([tagId])
+}
+
+// ===========================================
+// SAVED VIEWS (User-scoped per project, Pro-only)
+// ===========================================
+
+model SavedView {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  queryJson String // JSON-serialized view settings
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, userId, name])
+  @@index([projectId, userId])
+}
+
+// ===========================================
+// SLACK INTEGRATION
+// ===========================================
+
+model SlackWorkspace {
+  id                String    @id @default(cuid())
+  teamId            String    @unique // Slack team ID
+  teamName          String?
+  botToken          String // Bot OAuth token (store securely)
+  botUserId         String? // Bot's Slack user ID
+  installedByUserId String
+  revokedAt         DateTime? // Set when token is revoked
+
+  installedByUser User                   @relation(fields: [installedByUserId], references: [id], onDelete: Cascade)
+  projectSettings ProjectSlackSettings[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([installedByUserId])
+}
+
+enum SlackNotificationMode {
+  OFF
+  DIGEST
+  REALTIME
+}
+
+model ProjectSlackSettings {
+  id               String                @id @default(cuid())
+  projectId        String                @unique
+  slackWorkspaceId String
+  enabled          Boolean               @default(false)
+  channelIds       String[]              @default([]) // Slack channel IDs
+  channelNames     String[]              @default([]) // Slack channel names (for display)
+  mode             SlackNotificationMode @default(DIGEST)
+  lastDigestSentAt DateTime? // Last time digest was sent for this project
+
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace SlackWorkspace @relation(fields: [slackWorkspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([slackWorkspaceId])
+}
+
+enum SlackDeliveryType {
+  REALTIME
+  DIGEST
+  TEST
+  THROTTLED // High volume notice message
+}
+
+enum SlackDeliveryStatus {
+  SENT
+  FAILED
+  SKIPPED // Throttled/skipped due to rate limit
+}
+
+model SlackDeliveryLog {
+  id           String              @id @default(cuid())
+  projectId    String
+  submissionId String? // Only for REALTIME
+  type         SlackDeliveryType
+  status       SlackDeliveryStatus
+  errorCode    String? // Slack error code if failed
+  errorMessage String? // Error message if failed
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+// ===========================================
+// MICROSOFT TEAMS INTEGRATION
+// ===========================================
+
+model TeamsWorkspace {
+  id                   String    @id @default(cuid())
+  tenantId             String    @unique // Microsoft tenant ID
+  tenantName           String?
+  accessTokenEnc       String // AES-256-GCM encrypted access token
+  refreshTokenEnc      String? // AES-256-GCM encrypted refresh token (optional)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated OAuth scopes
+  installedByUserId    String
+  revokedAt            DateTime? // Set when token is revoked
+
+  installedByUser User @relation(fields: [installedByUserId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([installedByUserId])
+  @@index([tenantId])
+}
+
+// ===========================================
+// ISSUES / PIPELINE
+// ===========================================
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  ARCHIVED
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ActionStatus {
+  NEW
+  TRIAGED
+  PLANNED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  WONT_DO
+}
+
+enum ActionLinkByType {
+  HUMAN
+  AI
+  RULE
+  IMPORT
+}
+
+enum ActionLinkStrength {
+  STRONG
+  MEDIUM
+  WEAK
+}
+
+enum ActionRecommendationKind {
+  ATTACH_EXISTING
+  CREATE_NEW
+}
+
+enum ActionRecommendationStatus {
+  PENDING
+  ATTACHED
+  DISMISSED
+}
+
+model Issue {
+  id          String         @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  status      IssueStatus    @default(OPEN)
+  priority    IssuePriority?
+  closedAt    DateTime? // Set when status first becomes DONE
+
+  project  Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  links    IssueSubmission[]
+  comments IssueComment[]
+  jiraLink JiraIssueLink?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status])
+  @@index([projectId, updatedAt])
+}
+
+model IssueSubmission {
+  issueId      String
+  submissionId String
+
+  issue      Issue      @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([issueId, submissionId])
+  @@index([issueId])
+  @@index([submissionId])
+}
+
+model IssueComment {
+  id      String @id @default(cuid())
+  issueId String
+  userId  String
+  body    String // max 4000 chars
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([issueId, createdAt])
+}
+
+// ===========================================
+// ACTIONS SYSTEM
+// ===========================================
+
+model Action {
+  id          String       @id @default(cuid())
+  workspaceId String
+  title       String
+  description String?
+  status      ActionStatus @default(NEW)
+  startDate   DateTime?
+  dueDate     DateTime?
+  closedAt    DateTime?
+  assigneeId  String?
+  createdById String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignee  User?     @relation("ActionAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy User      @relation("ActionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  submissionLinks SubmissionActionLink[]
+  comments        ActionComment[]
+  decisions       ActionDecision[]
+  externalLinks   ActionExternalLink[]
+  recommendations SubmissionActionRecommendation[] @relation("SubmissionActionRecommendationAction")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, updatedAt])
+  @@index([workspaceId, dueDate])
+  @@index([workspaceId, assigneeId])
+  @@index([workspaceId, createdAt])
+}
+
+model SubmissionActionLink {
+  id             String             @id @default(cuid())
+  workspaceId    String
+  submissionId   String
+  actionId       String
+  linkedByType   ActionLinkByType
+  linkedByUserId String?
+  linkReason     String
+  linkConfidence Float
+  linkStrength   ActionLinkStrength
+
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  action       Action     @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  linkedByUser User?      @relation("SubmissionActionLinkLinkedBy", fields: [linkedByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([submissionId, actionId])
+  @@index([workspaceId, createdAt])
+  @@index([submissionId])
+  @@index([actionId])
+}
+
+model SubmissionActionRecommendation {
+  id                     String                     @id @default(cuid())
+  workspaceId            String
+  submissionId           String
+  actionId               String?
+  kind                   ActionRecommendationKind
+  recommendedTitle       String?
+  recommendedDescription String?
+  confidence             Float
+  reason                 String
+  status                 ActionRecommendationStatus @default(PENDING)
+  dismissReason          String?
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  action     Action?    @relation("SubmissionActionRecommendationAction", fields: [actionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([submissionId, actionId, kind])
+  @@index([workspaceId, createdAt])
+  @@index([submissionId, status])
+}
+
+model ActionComment {
+  id          String @id @default(cuid())
+  workspaceId String
+  actionId    String
+  userId      String
+  body        String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  action    Action    @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([actionId, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+model ActionDecision {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  actionId     String
+  decisionType String
+  summary      String
+  decidedById  String
+  decidedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  action    Action    @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  decidedBy User      @relation("ActionDecisionDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([actionId, decidedAt])
+  @@index([workspaceId, decidedAt])
+}
+
+model ActionExternalLink {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  actionId       String
+  provider       String // "jira", "linear", "github", etc.
+  externalId     String
+  externalUrl    String
+  syncDirection  String    @default("none")
+  syncFieldsJson Json?
+  lastSyncedAt   DateTime?
+  syncStatus     String    @default("healthy")
+  errorMessage   String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  action    Action    @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, provider, externalId])
+  @@index([actionId, provider])
+  @@index([workspaceId, provider])
+  @@index([workspaceId, updatedAt])
+}
+
+// ===========================================
+// JIRA INTEGRATION
+// ===========================================
+
+model JiraConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String // AES-256-GCM encrypted
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated scopes
+  lastValidatedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model JiraProjectSettings {
+  id              String   @id @default(cuid())
+  projectId       String   @unique
+  jiraCloudId     String
+  jiraSiteUrl     String
+  jiraProjectId   String
+  jiraProjectKey  String?
+  jiraIssueTypeId String
+  defaultLabels   String[] @default([])
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model JiraIssueLink {
+  id             String    @id @default(cuid())
+  issueId        String    @unique
+  jiraCloudId    String
+  jiraIssueId    String
+  jiraIssueKey   String
+  jiraIssueUrl   String
+  statusName     String?
+  statusCategory String?
+  lastSyncedAt   DateTime?
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jiraCloudId, jiraIssueId])
+}
+
+// ===========================================
+// LINEAR INTEGRATION
+// ===========================================
+
+model LinearConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (Linear uses optional refresh tokens)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated scopes
+  lastValidatedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LinearProjectSettings {
+  id              String   @id @default(cuid())
+  projectId       String   @unique
+  linearTeamId    String // Linear team ID
+  linearProjectId String? // Linear project ID (optional)
+  defaultLabelIds String[] @default([]) // Linear label IDs
+  assigneeId      String? // Linear user ID (optional)
+  priority        Int? // 0 = No priority, 1 = Urgent, 2 = High, 3 = Medium, 4 = Low
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// HUBSPOT INTEGRATION
+// ===========================================
+
+model HubSpotConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String // AES-256-GCM encrypted
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated scopes
+  lastValidatedAt      DateTime?
+  hubId                String? // HubSpot portal/hub ID
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HubSpotProjectSettings {
+  id         String @id @default(cuid())
+  projectId  String @unique
+  // Object type to create: "ticket", "task", or "note"
+  objectType String @default("ticket") // "ticket" | "task" | "note"
+
+  // Ticket-specific settings
+  ticketPipelineId    String? // HubSpot ticket pipeline ID
+  ticketPipelineStage String? // HubSpot ticket pipeline stage ID
+  ticketOwnerId       String? // HubSpot owner/user ID for tickets
+
+  // Task-specific settings
+  taskOwnerId  String? // HubSpot owner/user ID for tasks
+  taskStatus   String? // Task status (e.g., "NOT_STARTED", "IN_PROGRESS", "COMPLETED")
+  taskPriority String? // Task priority (e.g., "HIGH", "MEDIUM", "LOW")
+
+  // Note-specific settings (notes don't have many configurable options)
+
+  // Association settings (optional - associate to Contact/Company/Deal)
+  associateToContactId String?
+  associateToCompanyId String?
+  associateToDealId    String?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// SALESFORCE INTEGRATION
+// ===========================================
+
+model SalesforceConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String // AES-256-GCM encrypted
+  accessTokenExpiresAt DateTime
+  instanceUrl          String // Salesforce instance URL (e.g., https://na1.salesforce.com)
+  orgId                String? // Salesforce organization ID
+  salesforceUserId     String? // Salesforce user ID (SF user, not Signal user)
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SalesforceProjectSettings {
+  id         String @id @default(cuid())
+  projectId  String @unique
+  // Object type to create: "Case" (default) or "Task"
+  objectType String @default("Case") // "Case" | "Task"
+
+  // Case-specific settings
+  caseRecordTypeId String? // Salesforce Case Record Type ID
+  casePriority     String? // Case priority (e.g., "High", "Medium", "Low")
+  caseOrigin       String? // Case origin (e.g., "Web", "Email", "Phone")
+  caseStatus       String? // Default case status (e.g., "New", "Working")
+  caseOwnerId      String? // Salesforce user/queue ID for case assignment
+
+  // Task-specific settings
+  taskSubject  String? // Default task subject template
+  taskPriority String? // Task priority (e.g., "High", "Normal", "Low")
+  taskStatus   String? // Task status (e.g., "Not Started", "In Progress", "Completed")
+  taskOwnerId  String? // Salesforce user ID for task assignment
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// NOTION INTEGRATION
+// ===========================================
+
+model NotionConnection {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  accessTokenEnc  String // AES-256-GCM encrypted
+  workspaceId     String? // Notion workspace ID
+  workspaceName   String? // Notion workspace name
+  botId           String? // Notion bot ID
+  scopes          String // Space-separated OAuth scopes
+  lastValidatedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model NotionProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination database
+  databaseId String // Notion database ID
+
+  // Field mapping configuration (JSON)
+  // {
+  //   title: "property_id",
+  //   description: "property_id" | null,
+  //   sourceUrl: "property_id" | null,
+  //   formName: "property_id" | null,
+  //   severity: "property_id" | null,
+  //   status: "property_id" | null  // For sync-back
+  // }
+  fieldMapping Json // Validated with Zod schema
+
+  // Optional: status property name for sync-back
+  statusPropertyName String? // Name of the status property in Notion (for sync-back)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// ZENDESK INTEGRATION
+// ===========================================
+
+model ZendeskConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  subdomain            String // Zendesk subdomain (e.g., "acme" for acme.zendesk.com)
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional, depends on OAuth flow)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+  zendeskUserId        String? // Zendesk user ID (for display)
+  zendeskUserEmail     String? // Zendesk user email (for display)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([subdomain])
+}
+
+model ZendeskProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Default ticket settings
+  defaultTicketFormId String? // Zendesk ticket form ID
+  defaultGroupId      String? // Zendesk group ID
+  defaultTags         String[] @default([]) // Default tags (e.g., ["shapeship", "feedback"])
+
+  // Priority mapping (optional)
+  defaultPriority String? // "urgent" | "high" | "normal" | "low"
+
+  // Field mapping configuration (JSON)
+  // {
+  //   subject: string (template or field name)
+  //   description: string (template or field name)
+  //   priority: string | null
+  //   tags: string[] | null
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model IntercomConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+  intercomAppId        String? // Intercom app ID (for display)
+  intercomUserId       String? // Intercom user ID (for display)
+  intercomUserEmail    String? // Intercom user email (for display)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ===========================================
+// FRESHDESK INTEGRATION
+// ===========================================
+
+model FreshdeskConnection {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  domain          String // Freshdesk domain (e.g., "acme" for acme.freshdesk.com)
+  apiKeyEnc       String // AES-256-GCM encrypted API key
+  connectedAt     DateTime  @default(now())
+  lastUsedAt      DateTime?
+  lastValidatedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([domain])
+}
+
+// ===========================================
+// CODA INTEGRATION
+// ===========================================
+
+model CodaConnection {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  apiTokenEnc     String // AES-256-GCM encrypted API token
+  lastValidatedAt DateTime?
+  codaUserId      String? // Coda user ID from /whoami
+  codaUserEmail   String? // Coda user email
+  codaUserName    String? // Coda user name
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model CodaProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination doc and table
+  docId   String // Coda doc ID
+  tableId String // Coda table ID
+
+  // Field mapping configuration (JSON)
+  // {
+  //   title?: { columnId: string; columnName: string }
+  //   type?: { columnId: string; columnName: string }
+  //   formName?: { columnId: string; columnName: string }
+  //   pageUrl?: { columnId: string; columnName: string }
+  //   summary?: { columnId: string; columnName: string }
+  //   createdAt?: { columnId: string; columnName: string }
+  //   shapeshipLink?: { columnId: string; columnName: string }
+  //   status?: { columnId: string; columnName: string }
+  //   tags?: { columnId: string; columnName: string }
+  // }
+  fieldMapping Json // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// BIGQUERY INTEGRATION
+// ===========================================
+
+model BigQueryConnection {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  projectId         String // GCP Project ID
+  datasetId         String
+  location          String? // Optional, e.g., "US", "EU"
+  serviceAccountEnc String // Encrypted service account JSON
+  lastValidatedAt   DateTime?
+  lastExportAt      DateTime?
+  lastExportError   String? // Truncated error message
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model BigQueryDestination {
+  id                   String  @id @default(cuid())
+  projectId            String  @unique
+  exportSubmissions    Boolean @default(true)
+  exportActions        Boolean @default(true)
+  exportDeliveries     Boolean @default(false)
+  submissionsTableName String  @default("submissions")
+  actionsTableName     String  @default("actions")
+  deliveriesTableName  String  @default("deliveries")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// SNOWFLAKE INTEGRATION
+// ===========================================
+
+model SnowflakeConnection {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  account         String // Snowflake account identifier (e.g., "xy12345" or "xy12345.us-east-1")
+  warehouse       String
+  database        String
+  schema          String
+  username        String
+  passwordEnc     String? // Encrypted password (if using password auth)
+  privateKeyEnc   String? // Encrypted private key (if using key pair auth)
+  role            String? // Optional: specific role to use
+  lastValidatedAt DateTime?
+  lastExportAt    DateTime?
+  lastExportError String? // Truncated error message
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model SnowflakeDestination {
+  id                   String  @id @default(cuid())
+  projectId            String  @unique
+  exportSubmissions    Boolean @default(true)
+  exportActions        Boolean @default(true)
+  exportDeliveries     Boolean @default(false)
+  submissionsTableName String  @default("SUBMISSIONS") // Snowflake convention is uppercase
+  actionsTableName     String  @default("ACTIONS")
+  deliveriesTableName  String  @default("DELIVERIES")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// WAREHOUSE EXPORT STATE & DELIVERY LOGS
+// ===========================================
+
+model WarehouseExportState {
+  id             String    @id @default(cuid())
+  projectId      String
+  provider       String // "bigquery" | "snowflake"
+  tableName      String // Which table this state applies to (e.g., "submissions")
+  lastExportedAt DateTime? // Timestamp of the last successfully exported record
+  lastExportedId String? // ID of the last successfully exported record (for cursor-based batching)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, provider, tableName])
+  @@index([projectId, provider])
+}
+
+enum WarehouseDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  RETRYING
+}
+
+model WarehouseDeliveryLog {
+  id            String                  @id @default(cuid())
+  projectId     String
+  provider      String // "bigquery" | "snowflake"
+  tableName     String // Target table name
+  deliveryId    String                  @unique // Idempotency key for this specific delivery
+  sourceType    String // "submission" | "action" | "delivery"
+  sourceId      String // ID of the source record (submissionId, actionId, routeDeliveryLogId)
+  status        WarehouseDeliveryStatus @default(PENDING)
+  attemptCount  Int                     @default(0)
+  maxAttempts   Int                     @default(3)
+  nextAttemptAt DateTime?
+  lastAttemptAt DateTime?
+  errorMessage  String? // Truncated error message (max 500 chars)
+  responseCode  Int? // HTTP status code for API calls (if applicable)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, provider, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([sourceType, sourceId])
+}
+
+model IntercomProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Default conversation settings
+  defaultTags     String[] @default([]) // Default tags
+  defaultPriority String? // "priority" | null (Intercom priority levels)
+
+  // Field mapping configuration (JSON)
+  // {
+  //   subject: string (template or field name)
+  //   body: string (template or field name)
+  //   priority: string | null
+  //   tags: string[] | null
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// CONFLUENCE INTEGRATION
+// ===========================================
+
+model ConfluenceConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String // AES-256-GCM encrypted
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated scopes
+  lastValidatedAt      DateTime?
+
+  // Atlassian account info
+  atlassianAccountId    String? // Atlassian account ID
+  atlassianAccountEmail String? // Atlassian account email
+  selectedCloudId       String? // Selected Confluence Cloud site ID
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ConfluenceProjectSettings {
+  id              String  @id @default(cuid())
+  projectId       String  @unique
+  cloudId         String // Confluence Cloud site ID
+  spaceKey        String // Space key (e.g., "DOC", "DEV")
+  parentPageId    String? // Optional parent page ID (for organizing under a page)
+  contentTemplate Json // Page content template + field mapping (Zod validated)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// AIRTABLE INTEGRATION
+// ===========================================
+
+model AirtableConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (if provided)
+  accessTokenExpiresAt DateTime? // Token expiration time
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+  airtableUserId       String? // Airtable user ID from /v0/meta/whoami
+  airtableUserEmail    String? // Airtable user email
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AirtableProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination base and table
+  baseId  String // Airtable base ID
+  tableId String // Airtable table ID
+
+  // Field mapping configuration (JSON)
+  // {
+  //   includeFields: string[] // e.g., ["Title", "Description", "Source URL", "Form Name", "Severity", "Status", "Created At"]
+  //   statusFieldId?: string // Optional: single-select field ID for status mapping
+  // }
+  fieldMapping Json // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// GOOGLE SHEETS INTEGRATION
+// ===========================================
+
+model GoogleSheetsConnection {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  accessTokenEnc     String // AES-256-GCM encrypted
+  refreshTokenEnc    String // AES-256-GCM encrypted (for offline access)
+  expiresAt          DateTime? // Token expiration time
+  googleAccountEmail String? // User's Google account email
+  scopes             String // Space-separated OAuth scopes
+  lastValidatedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GoogleSheetsProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination spreadsheet
+  spreadsheetId String // Google Sheets spreadsheet ID
+  sheetName     String // Worksheet/tab name within the spreadsheet
+
+  // Field mapping configuration (JSON)
+  // {
+  //   includeFields: string[] // e.g., ["message", "email", "pageUrl", "createdAt", "formName"]
+  //   headerRow: number // Row number for headers (default: 1)
+  // }
+  fieldMapping Json // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// GITLAB INTEGRATION
+// ===========================================
+
+model GitLabConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional, depends on OAuth flow)
+  accessTokenExpiresAt DateTime?
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+
+  // GitLab instance info
+  baseUrl         String  @default("https://gitlab.com") // GitLab instance URL (default: GitLab.com)
+  gitlabUserId    String? // GitLab user ID
+  gitlabUsername  String? // GitLab username
+  gitlabUserEmail String? // GitLab user email
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([baseUrl])
+}
+
+model GitLabProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination project (can be project ID or full path like "group/project")
+  gitlabProjectId   String // GitLab project ID or full path (e.g., "123" or "group/project")
+  gitlabProjectPath String? // Full project path for display (e.g., "group/project")
+
+  // Defaults
+  defaultLabels String[] @default([]) // Default labels to add to issues
+  assigneeId    String? // GitLab user ID (optional)
+  milestoneId   String? // GitLab milestone ID (optional, for later)
+
+  // Field mapping (JSON)
+  // {
+  //   titleTemplate?: string // Template for issue title (default: uses submission/action title)
+  //   descriptionTemplate?: string // Template for description (default: includes link-back)
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// AZURE DEVOPS INTEGRATION
+// ===========================================
+
+model AzureDevOpsConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional, depends on OAuth flow)
+  accessTokenExpiresAt DateTime?
+  scopes               String // Space-separated OAuth scopes (e.g., "vso.work_write vso.profile")
+  lastValidatedAt      DateTime?
+
+  // Azure DevOps user info
+  devopsUserId      String? // Azure DevOps user ID (descriptor)
+  devopsDisplayName String? // Display name
+  devopsEmail       String? // Email
+
+  // Organization info (default org for quick access)
+  defaultOrganization String? // Default org (e.g., "myorg")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([defaultOrganization])
+}
+
+model AzureDevOpsProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination organization and project
+  organization      String // Azure DevOps organization name
+  devopsProjectId   String // Azure DevOps project ID (GUID)
+  devopsProjectName String? // Project name for display
+
+  // Work item type (User Story, Bug, Task)
+  workItemType String @default("User Story")
+
+  // Optional defaults
+  areaPath      String? // Area path (e.g., "Project\\Area")
+  iterationPath String? // Iteration path (e.g., "Project\\Iteration\\Sprint 1")
+  defaultTags   String[] @default([]) // Default tags
+  assignedTo    String? // Azure DevOps user descriptor (optional)
+  priority      String? // Priority value (e.g., "1", "2", "3")
+
+  // Field mapping (JSON)
+  // {
+  //   titleTemplate?: string
+  //   descriptionTemplate?: string
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// PIPEDREAM INTEGRATION
+// ===========================================
+
+model PipedreamConnection {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  endpointUrl        String // Pipedream HTTP/Webhook trigger URL
+  signingSecretEnc   String // AES-256-GCM encrypted signing secret
+  enabledEventTypes  Json      @default("[]") // string[] e.g. ["submission.created", "action.created"]
+  enabledModes       Json      @default("[\"INSTANT\", \"DIGEST\"]") // string[] e.g. ["INSTANT", "DIGEST"]
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus Int? // HTTP status code
+  lastDeliveryError  String? // Truncated error message
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ===========================================
+// TRELLO INTEGRATION
+// ===========================================
+
+model TrelloConnection {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  tokenEnc        String // AES-256-GCM encrypted Trello token
+  trelloUserId    String? // Trello user ID
+  trelloUsername  String? // Trello username
+  lastValidatedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TrelloProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination board and list
+  boardId String // Trello board ID
+  listId  String // Trello list ID (destination list)
+
+  // Optional defaults
+  labelIds  String[] @default([]) // Trello label IDs
+  memberIds String[] @default([]) // Trello member IDs to assign
+  dueDate   String? // Due date template (e.g., "in 7 days", ISO date)
+
+  // Field mapping (JSON)
+  // {
+  //   titleTemplate?: string
+  //   descriptionTemplate?: string
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// ASANA INTEGRATION
+// ===========================================
+
+model AsanaConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional, Asana supports refresh tokens)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+  asanaUserId          String? // Asana user ID (gid)
+  asanaUserEmail       String? // Asana user email
+  asanaUserName        String? // Asana user name
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AsanaProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination workspace, project, and optional section
+  workspaceId    String // Asana workspace ID (gid)
+  asanaProjectId String // Asana project ID (gid)
+  sectionId      String? // Asana section ID (gid, optional)
+
+  // Optional defaults
+  assigneeId String? // Asana user ID (gid) for task assignment
+  tags       String[] @default([]) // Asana tag names (not IDs, as tags are workspace-scoped)
+  dueDate    String? // Due date template (e.g., "+7 days", ISO date)
+
+  // Field mapping (JSON)
+  // {
+  //   titleTemplate?: string
+  //   descriptionTemplate?: string
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// CLICKUP INTEGRATION
+// ===========================================
+
+model ClickUpConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional, ClickUp supports refresh tokens)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+  clickupUserId        String? // ClickUp user ID
+  clickupUserEmail     String? // ClickUp user email
+  clickupUserName      String? // ClickUp user name
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ClickUpProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination: Team (Workspace) → Space → Folder (optional) → List
+  teamId   String // ClickUp team/workspace ID
+  spaceId  String // ClickUp space ID
+  folderId String? // ClickUp folder ID (optional - some spaces use folders)
+  listId   String // ClickUp list ID (destination)
+
+  // Optional defaults
+  assignees String[] @default([]) // ClickUp user IDs for task assignment
+  tags      String[] @default([]) // ClickUp tag names
+  priority  String? // ClickUp priority (1=urgent, 2=high, 3=normal, 4=low)
+  dueDate   String? // Due date template (e.g., "+7 days", ISO date)
+
+  // Field mapping (JSON)
+  // {
+  //   titleTemplate?: string
+  //   descriptionTemplate?: string
+  // }
+  fieldMapping Json? // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// MONDAY.COM INTEGRATION
+// ===========================================
+
+model MondayConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted
+  refreshTokenEnc      String? // AES-256-GCM encrypted (optional, Monday supports refresh tokens)
+  accessTokenExpiresAt DateTime
+  scopes               String // Space-separated OAuth scopes
+  lastValidatedAt      DateTime?
+  mondayUserId         String? // Monday user ID
+  mondayUserEmail      String? // Monday user email
+  mondayUserName       String? // Monday user name
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MondayProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination: Board + optional Group
+  boardId String // Monday board ID
+  groupId String? // Monday group ID (optional - items can be created in board root)
+
+  // Column mapping (JSON)
+  // {
+  //   nameColumnId?: string (required - item name)
+  //   descriptionColumnId?: string (long text column for description/context)
+  //   linkColumnId?: string (link column for ShapeShip link-back)
+  //   statusColumnId?: string (status column for sync-back)
+  //   peopleColumnId?: string (people column for assignee sync-back)
+  //   dateColumnId?: string (date column for due date)
+  //   defaultStatusLabel?: string (e.g., "New")
+  //   defaultAssigneeIds?: string[] (Monday user IDs)
+  // }
+  columnMapping Json // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// PAGERDUTY INTEGRATION
+// ===========================================
+
+model PagerDutyConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  accessTokenEnc       String // AES-256-GCM encrypted (OAuth token or API token)
+  accessTokenExpiresAt DateTime? // Only for OAuth tokens
+  scopes               String? // Space-separated OAuth scopes (optional for API token)
+  lastValidatedAt      DateTime?
+  pagerdutyUserId      String? // PagerDuty user ID
+  pagerdutyUserEmail   String? // PagerDuty user email
+  pagerdutyUserName    String? // PagerDuty user name
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PagerDutyProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination: Service
+  serviceId String // PagerDuty service ID
+
+  // Configuration (JSON)
+  // {
+  //   urgency?: "high" | "low" (default: "high")
+  //   titleTemplate?: string (default: "Action: {title}")
+  //   bodyTemplate?: string (default includes context + link-back)
+  // }
+  config Json // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// STATUSPAGE INTEGRATION
+// ===========================================
+
+model StatuspageConnection {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  apiKeyEnc       String // AES-256-GCM encrypted API key
+  lastValidatedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model StatuspageProjectSettings {
+  id        String @id @default(cuid())
+  projectId String @unique
+
+  // Destination: Page + optional Components
+  pageId       String // Statuspage page ID
+  componentIds String[] @default([]) // Optional component IDs for status updates
+
+  // Configuration (JSON)
+  // {
+  //   incidentImpact?: "none" | "minor" | "major" | "critical" (default: "minor")
+  //   incidentStatus?: "investigating" | "identified" | "monitoring" | "resolved" (default: "investigating")
+  //   messageTemplate?: string (default includes context + link-back)
+  // }
+  config Json // Validated with Zod schema
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// EXTERNAL OBJECT MAPPING (Generic sync-back foundation)
+// ===========================================
+
+model ExternalObjectMapping {
+  id String @id @default(cuid())
+
+  // Integration identification
+  integrationKey          String // e.g., "jira", "github", "linear"
+  integrationConnectionId String? // Optional: specific connection/workspace identifier (e.g., Jira cloudId, GitHub installationId)
+
+  // External object details
+  externalObjectType String // e.g., "issue", "ticket", "case", "task"
+  externalObjectId   String // External system's ID for this object
+  externalObjectUrl  String // Deep link to the external object
+
+  // References to internal Signal objects (at least one required)
+  projectId    String? // Optional: project/form reference
+  submissionId String? // Optional: submission reference
+  actionId     String? // Optional: action/issue reference (using "action" terminology)
+
+  // Sync state
+  lastSyncedAt   DateTime?
+  lastSyncStatus String? // "success" | "failed"
+  lastSyncError  String? // Sanitized error message (max 500 chars, no tokens/PII)
+  externalStatus String? // Current status in external system (e.g., "In Progress", "Done")
+  externalFields Json? // Additional fields from external system (limited to 10KB, validated)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for efficient lookups
+  @@unique([integrationKey, externalObjectId])
+  @@index([actionId])
+  @@index([submissionId])
+  @@index([projectId])
+  @@index([integrationKey, integrationConnectionId])
+  @@index([lastSyncStatus, lastSyncedAt])
+}
+
+// ===========================================
+// ZAPIER INTEGRATION
+// ===========================================
+
+model ZapierWebhook {
+  id                 String    @id @default(cuid())
+  projectId          String    @unique
+  enabled            Boolean   @default(true)
+  webhookUrl         String // Treat as secret - mask in UI
+  events             Json // string[] e.g. ["submission.created"]
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus Int? // HTTP status code
+  lastDeliveryError  String? // Truncated error message
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum ZapierDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model ZapierDeliveryLog {
+  id                  String               @id @default(cuid())
+  projectId           String
+  eventType           String // "submission.created", "zapier.test"
+  eventId             String               @unique // Idempotency key: "evt_<cuid>"
+  payload             Json // Full payload sent
+  status              ZapierDeliveryStatus @default(PENDING)
+  attemptCount        Int                  @default(0)
+  nextAttemptAt       DateTime?
+  lastAttemptAt       DateTime?
+  responseCode        Int?
+  responseBodySnippet String? // Truncated response body
+  error               String? // Truncated error message
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([status, nextAttemptAt])
+}
+
+// ===========================================
+// PROJECT ROUTING
+// ===========================================
+
+enum RouteMode {
+  INSTANT
+  DIGEST
+}
+
+enum RouteProvider {
+  EMAIL
+  SLACK
+  TEAMS
+  WEBHOOK
+  LINEAR
+  HUBSPOT
+  SALESFORCE
+  NOTION
+  MAKE
+  N8N
+  PIPEDREAM
+  GOOGLE_SHEETS
+  ZENDESK
+  INTERCOM
+  AIRTABLE
+  CONFLUENCE
+  GITLAB
+  AZURE_DEVOPS
+  TRELLO
+  ASANA
+  CLICKUP
+  JIRA
+  GITHUB
+  FRESHDESK
+  CODA
+  BIGQUERY
+  SNOWFLAKE
+  MONDAY
+  PAGERDUTY
+  STATUSPAGE
+}
+
+model ProjectRoute {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mode        RouteMode
+  provider    RouteProvider
+  enabled     Boolean       @default(true)
+  config      Json // Provider-specific configuration (emails, channelIds, webhook URL, etc.)
+  filterRules Json? // Optional: { statusIn?: string[], tagIds?: string[] } — delivery only when submission matches
+
+  deliveryLogs RouteDeliveryLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, mode])
+  @@index([projectId, enabled])
+}
+
+model ProjectDigestSettings {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sendTime  String  @default("09:00") // HH:MM format
+  timezone  String  @default("America/New_York") // IANA timezone string
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum RouteDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  RETRYING
+}
+
+model RouteDeliveryLog {
+  id        String       @id @default(cuid())
+  routeId   String
+  route     ProjectRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Delivery identification
+  deliveryId String        @unique // Idempotency key: "del_<cuid>"
+  mode       RouteMode
+  provider   RouteProvider
+
+  // Content reference
+  submissionId      String? // For INSTANT deliveries
+  digestWindowStart DateTime? // For DIGEST deliveries
+  digestWindowEnd   DateTime? // For DIGEST deliveries
+
+  // Status tracking
+  status        RouteDeliveryStatus @default(PENDING)
+  attemptCount  Int                 @default(0)
+  maxAttempts   Int                 @default(3)
+  nextAttemptAt DateTime?
+  lastAttemptAt DateTime?
+
+  // Error tracking
+  errorCode           String? // Provider-specific error code
+  errorMessage        String? // Truncated error message (max 500 chars)
+  responseCode        Int? // HTTP status code for webhooks
+  responseBodySnippet String? // Truncated response body (max 1000 chars)
+
+  // Metadata
+  payload Json? // Full payload sent (for debugging, max 10KB)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([routeId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([deliveryId])
+}
+
+// ===========================================
+// ADMIN / CONFIGURATION
+// ===========================================
+
+model AllowedSignupEmail {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  enabled   Boolean  @default(true)
+  addedBy   String? // Email of the admin who added it
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  addedBy   String? // Email of the admin who added it
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+// ===========================================
+// PHASE 9: DEMO SEEDING ALLOWLISTS
+// ===========================================
+
+model DemoWorkspaceAllowlist {
+  id             String    @id @default(cuid())
+  workspaceId    String    @unique
+  addedByUserId  String?
+  addedAt        DateTime  @default(now())
+  notes          String?
+
+  @@index([workspaceId])
+}
+
+model DemoSeedingAdminAllowlist {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  email          String // Normalized for audit
+  addedByUserId  String?
+  addedAt        DateTime  @default(now())
+  notes          String?
+
+  @@index([email])
+}
+
+// ===========================================
+// INTEGRATION HEALTH
+// ===========================================
+
+model IntegrationHealth {
+  id                  String    @id @default(cuid())
+  userId              String // Workspace owner (user)
+  provider            String // Integration provider ID (must match catalog)
+  healthStatus        String    @default("ok") // "ok" | "warning" | "broken" | "paused"
+  reasonCode          String? // e.g., "TOKEN_EXPIRED", "TOKEN_REVOKED", "DESTINATION_MISSING", "SCOPE_MISSING", "RATE_LIMITED", "UNKNOWN"
+  reasonMessage       String? // Short, redacted, user-friendly message
+  lastCheckedAt       DateTime?
+  nextCheckAt         DateTime?
+  consecutiveFailures Int       @default(0)
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  pausedUntil         DateTime?
+  lastAlertedAt       DateTime?
+  lastAlertedStatus   String? // Status when last alerted (for dedupe)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, provider])
+  @@index([healthStatus, nextCheckAt])
+  @@index([userId, healthStatus])
+  @@index([nextCheckAt])
+}
+
+// ===========================================
+// MULTI-TENANCY FOUNDATION (Platform v2)
+// ===========================================
+
+model Workspace {
+  id     String  @id @default(cuid())
+  name   String
+  plan   String  @default("free") // Legacy field - use WorkspaceBilling.planId instead
+  slug   String? @unique // Optional URL-friendly identifier
+  image  String? // Workspace icon/avatar URL (uploaded via Settings, same as user profile photo)
+  isDemo Boolean @default(false) // Marks workspace as demo data for staging screenshots
+  actionsKanbanConfigJson Json? // Actions Kanban board configuration (column order, labels, visibility)
+  actionsAiConfigJson Json? // Actions AI configuration (recommendations, auto-attach, threshold)
+
+  // Relations
+  memberships                     WorkspaceMembership[]
+  invites                         WorkspaceInvite[]
+  projects                        Project[]
+  featureFlags                    FeatureFlag[]
+  settings                        WorkspaceSettings?
+  policy                          WorkspacePolicy?
+  fixPackets                      FixPacket[]
+  eventLogs                       EventLog[]
+  auditLogs                       AuditLog[]
+  jobs                            Job[]
+  integrations                    Integration[]
+  integrationConnections          IntegrationConnection[]
+  billing                         WorkspaceBilling?
+  credits                         WorkspaceCredits?
+  creditLedger                    CreditLedger[]
+  usageCounters                   UsageCounter[]
+  notificationLogs                WorkspaceNotificationLog[]
+  actions                         Action[]
+  actionExternalLinks             ActionExternalLink[]
+  actionComments                  ActionComment[]
+  actionDecisions                 ActionDecision[]
+  submissionActionLinks           SubmissionActionLink[]
+  submissionActionRecommendations SubmissionActionRecommendation[]
+  submissionLabels                SubmissionLabel[]
+  workspaceLabelDictionary         WorkspaceLabelDictionary[]
+  workspaceLabelAliases            WorkspaceLabelAlias[]
+  submissionLabelRuns              SubmissionLabelRun[]
+  workspaceAiUsageDaily            WorkspaceAiUsageDaily[]
+  labelFeedback                    LabelFeedback[]
+  submissionSimilarity             SubmissionSimilarity[]
+  backfillJobs                     BackfillJob[]
+  workspaceLabelRules              WorkspaceLabelRule[]
+  sessionArtifacts                 SessionArtifact[]
+  canonicalIssues                  CanonicalIssue[]
+  githubInstallation               GitHubInstallation?
+  githubRepoBindings               GitHubRepoBinding[]
+  reproArtifacts                   ReproArtifact[]
+  closeLoopVerifications           CloseLoopVerification[]
+  apiTokens                        ApiToken[]
+  
+  // Team relations
+  teams                            Team[]
+  
+  // RBAC user roles (Issue #45)
+  userRoles                        UserRole[]
+  
+  // Incident webhooks (StatusClaw)
+  incidentWebhooks                 IncidentWebhook[]
+  incidentWebhookDeliveries        IncidentWebhookDelivery[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([plan])
+  @@index([isDemo])
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model WorkspaceMembership {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  userId       String
+  role         WorkspaceRole @default(MEMBER)
+  lastActiveAt DateTime? // Track when user last accessed this workspace
+  sortOrder    Int?          // User-defined order for workspace list (lower = higher in list)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([workspaceId, role])
+  @@index([userId, lastActiveAt])
+  @@index([userId, sortOrder])
+}
+
+enum WorkspaceInviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+model WorkspaceInvite {
+  id              String                @id @default(cuid())
+  workspaceId     String
+  email           String // Lowercased email address
+  role            WorkspaceRole         @default(MEMBER)
+  tokenHash       String                @unique // SHA-256 hash of invite token
+  invitedByUserId String
+  status          WorkspaceInviteStatus @default(PENDING)
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("invitedBy", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+// ===========================================
+// USER ROLE (RBAC - Issue #45)
+// ===========================================
+
+enum UserRoleType {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+model UserRole {
+  id          String      @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        UserRoleType @default(VIEWER)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+// ===========================================
+// EVENT LOG (Canonical Event Model)
+// ===========================================
+
+model EventLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Source identification
+  sourceJson Json // { kind: "form" | "integration" | "system", name: string, connection_id?: string }
+
+  // Event classification
+  type String // e.g., "submission.created", "integration.ticket.created", "action.status_changed"
+
+  // Entity reference
+  subjectJson Json // { entity_type: string, entity_id: string }
+
+  // Actor (optional)
+  actorJson Json? // { user_id?: string, external_actor?: string }
+
+  // Timestamps
+  occurredAt DateTime // When it happened at source
+  receivedAt DateTime @default(now()) // When we received it
+
+  // Payload
+  payloadJson Json // Raw content (no secrets, see PII rules)
+
+  // Deduplication
+  dedupeKey     String? // REQUIRED for webhook-like events and retryable ingestion
+  correlationId String? // Ties webhook -> job -> action chains
+
+  // Schema versioning
+  schemaVersion Int @default(1)
+
+  createdAt DateTime @default(now())
+
+  @@unique([workspaceId, dedupeKey])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, type, createdAt])
+  @@index([correlationId])
+  @@index([workspaceId, type])
+}
+
+// ===========================================
+// AUDIT LOG (Security/Compliance)
+// ===========================================
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  actorUserId String? // User who performed the action
+  action      String // e.g., "user.created", "workspace.deleted", "integration.connected"
+  entityType  String // e.g., "workspace", "project", "integration"
+  entityId    String? // ID of the affected entity
+
+  // Minimal metadata (NO raw payload text, NO secrets)
+  metadataJson Json? // Limited, sanitized metadata only
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+}
+
+// ===========================================
+// JOBS (Durable Async Job Orchestration)
+// ===========================================
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  type   String // e.g., "webhook.process", "integration.sync", "form.submit"
+  status JobStatus @default(QUEUED)
+
+  // Idempotency
+  idempotencyKey String @unique
+
+  // Payload
+  payloadJson Json
+
+  // Retry configuration
+  attempts    Int @default(0)
+  maxAttempts Int @default(3)
+
+  // Scheduling
+  runAfter DateTime @default(now())
+
+  // Locking
+  lockedAt DateTime?
+  lockedBy String? // Worker identifier
+
+  // Error tracking
+  lastError String? // Truncated error message (max 500 chars)
+
+  // Relations
+  runs JobRun[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, runAfter])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+  @@index([idempotencyKey])
+}
+
+model JobRun {
+  id    String @id @default(cuid())
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String // "running" | "succeeded" | "failed"
+
+  // Logs (structured, no secrets)
+  logsJson  Json? // Array of log entries
+  errorJson Json? // Error details (sanitized)
+
+  createdAt DateTime @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([status, startedAt])
+}
+
+// ===========================================
+// FEATURE FLAGS (Workspace-scoped)
+// ===========================================
+
+model FeatureFlag {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  key        String // e.g., "enable_actions_beta", "enable_ai_insights"
+  enabled    Boolean @default(false)
+  configJson Json? // Optional configuration
+
+  // Rollout fields (Phase 7)
+  percentage  Int     @default(100) // 0-100 for canary rollout
+  description String?
+  entityType  String? // e.g. 'canonical_issue' — links flag to a specific entity
+  entityId    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId, enabled])
+  @@index([key, enabled])
+}
+
+// ===========================================
+// WORKSPACE SETTINGS (Governance)
+// ===========================================
+
+model WorkspaceSettings {
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  retentionDays       Int? // Data retention policy (days)
+  piiRedactionEnabled Boolean @default(false)
+
+  // AI labeling (Phase 7): optional budgets + rate limits + sensitive mode
+  aiLabelingDailyCap            Int?     // max labeling runs per day; null = no cap
+  aiLabelingRateLimitPerMinute   Int?     // max runs per minute; null = no limit
+  aiLabelingSensitiveModeSkip   Boolean  @default(false) // skip when token/password/cc patterns detected
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// WORKSPACE POLICIES (Spec §2 — evidence + autofix + rollback)
+// ===========================================
+
+model WorkspacePolicy {
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Evidence capture policy
+  evidenceMaxMode                  String  @default("off") // 'off'|'basic'|'advanced'
+  evidenceDefaultRetentionDays     Int     @default(30)
+  evidenceMaxPayloadKbBasic        Int     @default(200)
+  evidenceMaxPayloadKbAdvanced     Int     @default(750)
+  evidenceRateLimitPerUserPerHour  Int     @default(20)
+  evidenceRateLimitPerIpPerHour    Int     @default(100)
+
+  // Autofix policy
+  autofixEnabled            Boolean  @default(false)
+  autofixAllowedChangeTypes String[] @default(["copy", "css", "ui_logic", "logging", "docs"])
+  autofixForbiddenPaths     String[] @default(["**/auth/**", "**/billing/**", "**/payments/**", "**/db/**", "**/migrations/**"])
+  autofixMaxFiles           Int      @default(5)
+  autofixMaxLoc             Int      @default(80)
+  autofixRequiresTests      Boolean  @default(true)
+  autofixRequiredChecks     String[] @default(["lint", "typecheck", "test"])
+  autofixRolloutMode        String   @default("feature_flag") // 'none'|'feature_flag'|'canary'
+
+  // Rollback thresholds
+  rollbackErrorRateThreshold          Float @default(0.02)
+  rollbackPerfRegressionThresholdMs   Int   @default(200)
+
+  // Close-the-loop
+  closeLoopEnabled Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// FIX PACKETS (Spec §9)
+// ===========================================
+
+model FixPacket {
+  id      String @id @default(cuid())
+  version String @default("v1")
+
+  // Source linkage (polymorphic: submission or canonical_issue)
+  sourceType       String // 'submission' | 'canonical_issue'
+  submissionId     String?
+  submission       Submission? @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  canonicalIssueId String?
+  canonicalIssue   CanonicalIssue? @relation(fields: [canonicalIssueId], references: [id], onDelete: Cascade)
+
+  // Workspace scoping (for access control)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Content
+  contentJson     Json   // Structured FixPacket JSON
+  contentMarkdown String // Markdown rendition
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([submissionId])
+  @@index([workspaceId])
+  @@index([sourceType, submissionId])
+}
+
+// ===========================================
+// SESSION ARTIFACTS (Spec §5/§6 — evidence bundles)
+// ===========================================
+
+model SessionArtifact {
+  id           String    @id @default(cuid())
+  submissionId String    @unique
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  widgetId     String
+
+  mode             String  @default("basic") // 'basic' | 'advanced'
+  storagePath      String
+  storageSizeBytes Int     @default(0)
+
+  timelinePreview Json // top 200 events (errors, route changes, clicks near errors)
+  perfSummary     Json?
+  networkSummary  Json?
+  errorSummary    Json?
+  consentProof    Json // { selected_mode, consent_copy_version, timestamp, page_url_path, user_agent_hash }
+
+  eventCount Int
+  durationMs Int?
+  capturedAt DateTime
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([expiresAt])
+}
+
+// ===========================================
+// EVIDENCE NONCE (anti-replay for ingestion)
+// ===========================================
+
+model EvidenceNonce {
+  nonce  String   @id
+  usedAt DateTime @default(now())
+
+  @@index([usedAt])
+}
+
+// ===========================================
+// INTEGRATIONS (Workspace-scoped)
+// ===========================================
+
+model Integration {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  provider   String // e.g., "jira", "linear", "slack"
+  status     String @default("active") // "active" | "inactive" | "error"
+  configJson Json? // Provider-specific configuration
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connections IntegrationConnection[]
+
+  @@unique([workspaceId, provider])
+  @@index([workspaceId, status])
+}
+
+model IntegrationConnection {
+  id            String       @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  integrationId String?
+  integration   Integration? @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+
+  provider          String // e.g., "jira", "linear"
+  authType          String // "oauth" | "api_key" | "basic"
+  authJsonEncrypted String // Encrypted auth data (tokens, keys, etc.)
+
+  status       String    @default("active") // "active" | "inactive" | "error"
+  lastHealthAt DateTime?
+  lastError    String? // Truncated error message
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, provider])
+  @@index([workspaceId, status])
+  @@index([integrationId])
+}
+
+// ===========================================
+// RATE LIMITING
+// ===========================================
+
+model RateLimit {
+  id         String   @id @default(cuid())
+  identifier String // e.g., workspaceId, userId, IP hash
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, createdAt])
+}
+
+// ===========================================
+// WEBHOOK IDEMPOTENCY
+// ===========================================
+
+model WebhookEventDedup {
+  id        String   @id @default(cuid())
+  provider  String // e.g., "stripe", "zapier", "pipedream"
+  eventId   String // Unique event identifier from provider
+  createdAt DateTime @default(now())
+  expiresAt DateTime // For cleanup of old records
+
+  @@unique([provider, eventId])
+  @@index([provider, eventId])
+  @@index([expiresAt]) // For cleanup queries
+}
+
+// ===========================================
+// BILLING & ENTITLEMENTS (Phase 3)
+// ===========================================
+
+enum PlanId {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  NONE
+}
+
+enum CreditLedgerReason {
+  PURCHASE
+  CONSUME
+  ADMIN_ADJUST
+  WEBHOOK_REPLAY
+  MIGRATION
+}
+
+enum NotificationType {
+  SUBMISSIONS_NEARING_80
+  SUBMISSIONS_NEARING_95
+  SUBMISSIONS_LIMIT_REACHED
+  SUBMISSIONS_LIMIT_REMINDER
+}
+
+enum NotificationDestinationType {
+  SLACK
+  TEAMS
+  EMAIL
+  WEBHOOK
+  OTHER
+}
+
+// Plans table (seeded, read-only)
+model Plan {
+  id               PlanId             @id
+  name             String
+  entitlementsJson Json // JSONB: { limits: { seats_max, submissions_included_monthly, open_actions_max }, features: { pro_connectors_enabled, premium_connectors_enabled }, connector_access: { free: [...], pro: [...], premium: [...] } }
+  workspaceBilling WorkspaceBilling[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Workspace billing (replaces simple Workspace.plan field)
+model WorkspaceBilling {
+  workspaceId          String             @id
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  planId               PlanId             @default(FREE)
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  subscriptionStatus   SubscriptionStatus @default(NONE)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  trialEnd             DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Workspace credits (non-expiring submission credits)
+model WorkspaceCredits {
+  workspaceId             String    @id
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submissionCreditBalance Int       @default(0)
+
+  updatedAt DateTime @updatedAt
+}
+
+// Credit ledger (audit trail for all credit changes)
+model CreditLedger {
+  id            String             @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  delta         Int // Positive for purchase, negative for consumption
+  reason        CreditLedgerReason
+  stripeEventId String?            @unique // For idempotency on Stripe webhooks
+  metadata      Json? // Additional context (e.g., pack size, purchase details)
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([stripeEventId])
+}
+
+// Usage counters (monthly period tracking)
+model UsageCounter {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  metric      String // 'submissions_total' | 'submissions_unlocked' | 'submissions_locked' | 'actions_open' | 'seats_used'
+  periodStart DateTime // Period start (month boundary or subscription period)
+  periodEnd   DateTime // Period end
+  value       Int       @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, metric, periodStart])
+  @@index([workspaceId, metric, periodStart])
+  @@index([workspaceId, periodStart])
+}
+
+// Notification log (for throttling)
+model WorkspaceNotificationLog {
+  id               String                      @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  periodStart      DateTime
+  periodEnd        DateTime
+  notificationType NotificationType
+  destinationType  NotificationDestinationType
+  destinationId    String? // e.g., channel id, email group id
+  sentAt           DateTime                    @default(now())
+  metadata         Json? // Additional context
+
+  @@index([workspaceId, notificationType, periodStart])
+  @@index([workspaceId, destinationType, destinationId, periodStart])
+  @@index([workspaceId, periodStart, periodEnd])
+}
+
+// ===========================================
+// AI SUBMISSION LABELING (§2)
+// ===========================================
+
+model SubmissionLabel {
+  id           String   @id @default(cuid())
+  workspaceId String
+  submissionId String
+  type         String   // Label type (e.g. CATEGORY_PRIMARY, SEVERITY)
+  key          String
+  value        String
+  confidence   Float
+  source       String   // ai | user | rule | integration
+  reason       String?
+  evidence     String?
+  isNew        Boolean  @default(false)
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([workspaceId, submissionId, type, key])
+  @@index([workspaceId, type, key, submissionId])
+  @@index([workspaceId, submissionId, type])
+  @@index([workspaceId, type, value])
+  @@index([submissionId])
+}
+
+model WorkspaceLabelDictionary {
+  id              String    @id @default(cuid())
+  workspaceId      String
+  type            String
+  key             String
+  value           String
+  status          String    @default("approved") // approved | proposed | deprecated
+  locked          Boolean   @default(false)
+  usageCount      Int       @default(0)
+  lastUsedAt      DateTime?
+  createdByUserId String?
+  createdBySource String    @default("system") // ai | user | system
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([workspaceId, type, key])
+  @@index([workspaceId, type])
+  @@index([workspaceId, status])
+}
+
+model WorkspaceLabelAlias {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  type           String
+  aliasKey       String
+  aliasValue     String
+  canonicalKey   String
+  canonicalValue String
+  createdByUserId String?
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([workspaceId, type, aliasKey])
+  @@index([workspaceId, type])
+}
+
+model SubmissionLabelRun {
+  id                  String     @id @default(cuid())
+  workspaceId         String
+  submissionId        String
+  model               String
+  status              String     // queued | succeeded | failed | skipped_*
+  overallConfidence   Float?
+  validatedOutputJson Json?
+  error               String?
+  latencyMs           Int?
+  promptTokens        Int?
+  completionTokens    Int?
+  totalTokens         Int?
+  costUsd             Float?
+  workspace           Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submission          Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdAt           DateTime   @default(now())
+
+  @@index([workspaceId, submissionId])
+  @@index([workspaceId, createdAt])
+}
+
+model WorkspaceAiUsageDaily {
+  id                          String   @id @default(cuid())
+  workspaceId                 String
+  date                        DateTime @db.Date
+  labelingRunsCount           Int      @default(0)
+  totalTokens                 Int      @default(0)
+  costUsd                     Float    @default(0)
+  skippedDueToCapCount        Int      @default(0)
+  skippedDueToRateLimitCount  Int      @default(0)
+  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@unique([workspaceId, date])
+  @@index([workspaceId, date])
+}
+
+model LabelFeedback {
+  id               String     @id @default(cuid())
+  workspaceId      String
+  submissionId     String
+  labelId          String?
+  runId            String?
+  rating           String     // up | down
+  notes            String?
+  wrongLabelsJson  Json?      @default("[]") // [{ type, key }] when rating=down
+  createdByUserId  String
+  workspace        Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submission       Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdBy        User        @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdAt        DateTime   @default(now())
+
+  @@index([workspaceId, submissionId])
+  @@index([runId])
+}
+
+model SubmissionSimilarity {
+  id                   String     @id @default(cuid())
+  workspaceId          String
+  submissionId         String
+  clusterId            String
+  possibleDuplicatesJson Json    @default("[]")
+  workspace            Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submission           Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdAt            DateTime   @default(now())
+
+  @@unique([workspaceId, submissionId])
+  @@index([workspaceId, clusterId])
+}
+
+model BackfillJob {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  status             String    // queued | running | paused | succeeded | failed | cancelled
+  mode               String    // label_missing | relabel_all | relabel_after_merge
+  filtersJson        Json?
+  processedCount     Int       @default(0)
+  totalCountEstimate Int?
+  lastCursor        String?
+  error             String?
+  createdByUserId    String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy          User      @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([workspaceId, status])
+}
+
+model WorkspaceLabelRule {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  priority        Int      @default(0)
+  enabled         Boolean  @default(true)
+  conditionsJson  Json
+  actionsJson     Json
+  createdByUserId String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy       User      @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([workspaceId, priority])
+}
+
+// ============================================
+// Insights System (Forms Platform Phase 1)
+// ============================================
+
+model InsightModule {
+  id                   String   @id
+  name                 String
+  description          String?
+  applicableFormTypes  String[] // Form type IDs; empty = all
+  supportsIncremental  Boolean  @default(false)
+  computeCadence       String?  // "on_submission", "daily", "weekly"
+  outputSchema         Json?
+  enabled              Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  formStates InsightFormState[]
+  runs       InsightRun[]
+  cards      InsightCard[]
+}
+
+model InsightFormState {
+  id        String   @id @default(cuid())
+  formId    String
+  moduleId  String
+  enabled   Boolean  @default(true)
+  config    Json?
+  lastRunId String?
+  lastRunAt DateTime?
+  freshness String?  // "stale", "fresh", "computing"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  form   Project       @relation(fields: [formId], references: [id], onDelete: Cascade)
+  module InsightModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, moduleId])
+  @@index([formId])
+  @@index([lastRunAt])
+}
+
+model InsightRun {
+  id                       String    @id @default(cuid())
+  formId                   String
+  moduleId                 String
+  status                   String    // "started", "completed", "failed"
+  startedAt                DateTime  @default(now())
+  completedAt              DateTime?
+  inputWindowStart         DateTime?
+  inputWindowEnd           DateTime?
+  submissionCountProcessed Int       @default(0)
+  submissionIdsSampled     String[]
+  latencyMs                Int?
+  errorCode                String?
+  errorMessage             String?
+  tokenCount               Int?
+  costUsd                  Decimal?  @db.Decimal(10, 6)
+  createdAt                DateTime  @default(now())
+
+  form   Project       @relation(fields: [formId], references: [id], onDelete: Cascade)
+  module InsightModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  cards  InsightCard[]
+
+  @@index([formId, moduleId, startedAt(sort: Desc)])
+  @@index([status, startedAt])
+}
+
+model InsightCard {
+  id                      String   @id @default(cuid())
+  runId                   String
+  formId                  String
+  moduleId                String
+  title                   String
+  summary                 String
+  confidence              Decimal? @db.Decimal(3, 2)
+  rationale               String?
+  supportingSubmissionIds String[]
+  filterToken             String?
+  evidenceCount           Int      @default(0)
+  metadata                Json?
+  createdAt               DateTime @default(now())
+
+  run      InsightRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  form     Project       @relation(fields: [formId], references: [id], onDelete: Cascade)
+  module   InsightModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  feedback InsightFeedback[]
+
+  @@index([runId])
+  @@index([formId, moduleId])
+}
+
+model InsightFeedback {
+  id        String   @id @default(cuid())
+  cardId    String
+  userId    String
+  direction String   // "up" or "down"
+  comment   String?
+  createdAt DateTime @default(now())
+
+  card InsightCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+}
+
+// ── Phase 3: Canonical Issues + clustering ──────────────────────────────────
+
+model CanonicalIssue {
+  id          String @id @default(cuid())
+  projectId   String
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  title   String
+  summary String @db.Text
+
+  status String @default("open") // 'open' | 'in_progress' | 'done' | 'archived'
+
+  embeddingJson      Json?
+  errorSignatureHash String?
+
+  signalsJson Json @default("{}")
+
+  impactScore     Int @default(0)
+  fixabilityScore Int @default(0)
+  confidenceScore Int @default(0)
+  riskScore       Int @default(0)
+
+  occurrenceCount Int @default(0)
+
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+
+  // Merge/rollback tracking (Phase 7)
+  mergedPrNumber      Int?
+  mergedPrUrl         String?
+  mergedAt            DateTime?
+  rollbackStatus      String    @default("none") // 'none' | 'monitoring' | 'triggered' | 'reverted'
+  closeLoopNotifiedAt DateTime?
+
+  occurrences          IssueOccurrence[]
+  fixPackets           FixPacket[]
+  githubIssueLinks     GitHubIssueLink[]
+  reproArtifacts       ReproArtifact[]
+  closeLoopVerifications CloseLoopVerification[]
+  healthCheckSnapshots HealthCheckSnapshot[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status])
+  @@index([workspaceId, status])
+  @@index([projectId, impactScore])
+  @@index([errorSignatureHash])
+}
+
+model IssueOccurrence {
+  id               String         @id @default(cuid())
+  canonicalIssueId String
+  canonicalIssue   CanonicalIssue @relation(fields: [canonicalIssueId], references: [id], onDelete: Cascade)
+  submissionId     String         @unique
+  submission       Submission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  workspaceId      String
+
+  matchMethod String  // 'embedding' | 'error_hash' | 'route' | 'new_cluster'
+  matchScore  Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([canonicalIssueId, createdAt])
+  @@index([workspaceId, submissionId])
+}
+
+// ── Phase 4: GitHub Integration ─────────────────────────────────────────────
+
+model GitHubInstallation {
+  id             String @id @default(cuid())
+  workspaceId    String @unique
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  installationId Int    @unique
+  accountLogin   String
+  accountType    String // 'Organization' | 'User'
+  status         String @default("active") // 'active' | 'suspended' | 'removed'
+
+  repoBindings   GitHubRepoBinding[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model GitHubRepoBinding {
+  id              String @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installationId  String
+  installation    GitHubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  owner           String
+  repo            String
+  fullName        String
+  defaultBranch   String @default("main")
+  isDefault       Boolean @default(false)
+
+  issueLinks      GitHubIssueLink[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([workspaceId, owner, repo])
+  @@index([installationId])
+}
+
+model GitHubIssueLink {
+  id                String @id @default(cuid())
+  canonicalIssueId  String
+  canonicalIssue    CanonicalIssue @relation(fields: [canonicalIssueId], references: [id], onDelete: Cascade)
+  repoBindingId     String
+  repoBinding       GitHubRepoBinding @relation(fields: [repoBindingId], references: [id], onDelete: Cascade)
+  workspaceId       String
+
+  githubIssueNumber Int
+  githubIssueUrl    String
+  githubIssueState  String @default("open")
+  lastSyncedAt      DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([canonicalIssueId, repoBindingId])
+  @@index([workspaceId])
+}
+
+// ── Phase 5: Repro Harness ──────────────────────────────────────────────────
+
+model ReproArtifact {
+  id               String         @id @default(cuid())
+  canonicalIssueId String
+  canonicalIssue   CanonicalIssue @relation(fields: [canonicalIssueId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submissionId     String
+
+  testContent          String @db.Text
+  confidence           Int
+  warningsJson         Json   @default("[]")
+  selectorStrategyJson Json   @default("{}")
+
+  githubPrUrl    String?
+  githubPrNumber Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([canonicalIssueId])
+  @@index([workspaceId])
+}
+
+// ===========================================
+// CLOSE-LOOP VERIFICATIONS (Spec §14)
+// ===========================================
+
+model CloseLoopVerification {
+  id               String         @id @default(cuid())
+  canonicalIssueId String
+  canonicalIssue   CanonicalIssue @relation(fields: [canonicalIssueId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  submissionId     String
+
+  email       String
+  token       String   @unique
+  status      String   @default("pending") // 'pending' | 'confirmed' | 'not_fixed' | 'expired'
+  response    String?
+  respondedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([canonicalIssueId])
+  @@index([workspaceId])
+}
+
+// ===========================================
+// HEALTH CHECK SNAPSHOTS (Spec §13 — rollback)
+// ===========================================
+
+model HealthCheckSnapshot {
+  id               String         @id @default(cuid())
+  canonicalIssueId String
+  canonicalIssue   CanonicalIssue @relation(fields: [canonicalIssueId], references: [id], onDelete: Cascade)
+  workspaceId      String
+
+  errorRate        Float   @default(0)
+  p95LatencyMs     Int     @default(0)
+  newCriticalErrors Int    @default(0)
+  status           String  @default("healthy") // 'healthy' | 'degraded' | 'rollback_triggered'
+
+  checkedAt DateTime @default(now())
+
+  @@index([canonicalIssueId])
+}
+
+// ===========================================
+// API TOKENS (Spec §15 — MCP + CLI auth)
+// ===========================================
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+
+  name      String
+  tokenHash String   @unique
+  prefix    String    // first 8 chars for display: "sk_live_..."
+  scopes    String[]  @default(["read"]) // 'read' | 'write' | 'admin'
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+// ===========================================
+// TEAM ROLES (Phase 3 - Team-based access control)
+// ===========================================
+
+enum TeamRole {
+  ADMIN    // Full team management access
+  EDITOR   // Can create and edit team resources
+  VIEWER   // Read-only access to team resources
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  name        String
+  description String?
+  slug        String   @unique // URL-friendly identifier
+  
+  // Relations
+  members     TeamMember[]
+  permissions TeamPermission[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@unique([workspaceId, name])
+}
+
+model TeamMember {
+  id          String   @id @default(cuid())
+  teamId      String
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  role        TeamRole @default(VIEWER)
+  
+  // Track who added this member
+  addedById   String?
+  addedAt     DateTime @default(now())
+  
+  // Expiration for temporary access
+  expiresAt   DateTime?
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@index([teamId, role])
+}
+
+// Granular team permissions model
+model TeamPermission {
+  id          String   @id @default(cuid())
+  teamId      String
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  // Permission scope (what resource)
+  resourceType String  // 'project', 'submission', 'action', 'integration'
+  resourceId   String? // null = all resources of this type
+  
+  // Permission action
+  action      String   // 'read', 'write', 'delete', 'admin'
+  
+  // Who can perform this action
+  allowedRoles TeamRole[] @default([VIEWER])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([teamId, resourceType, resourceId, action])
+  @@index([teamId])
+  @@index([resourceType, resourceId])
+}
+
+// ===========================================
+// INCIDENT WEBHOOKS (StatusClaw)
+// ===========================================
+
+enum WebhookType {
+  SLACK
+  DISCORD
+  PAGERDUTY
+}
+
+enum WebhookStatus {
+  ACTIVE
+  FAILING
+  DISABLED
+}
+
+enum WebhookEventType {
+  INCIDENT_CREATED
+  INCIDENT_UPDATED
+  INCIDENT_RESOLVED
+}
+
+model IncidentWebhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  name        String
+  type        WebhookType
+  enabled     Boolean   @default(true)
+  
+  // Subscribed events (JSON array of event types)
+  events      Json // ["incident.created", "incident.updated", "incident.resolved"]
+  
+  // Type-specific configuration
+  // Slack/Discord: { url: string }
+  // PagerDuty: { routingKey: string }
+  config      Json
+  
+  // Webhook signing secret (HMAC-SHA256)
+  signingSecret String? // Encrypted at rest
+  
+  // Status tracking
+  status            WebhookStatus @default(ACTIVE)
+  lastDeliveryAt    DateTime?
+  lastDeliveryStatus Int? // HTTP status code
+  lastDeliveryError String? // Truncated error message
+  
+  // Relations
+  deliveries  IncidentWebhookDelivery[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([status, lastDeliveryAt])
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  RETRYING
+}
+
+model IncidentWebhookDelivery {
+  id                  String               @id @default(cuid())
+  webhookId           String
+  webhook             IncidentWebhook      @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  workspaceId         String
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  // Event details
+  eventType           String // "incident.created", "incident.updated", "incident.resolved"
+  eventId             String // ULID of the event
+  idempotencyKey      String // Prevent duplicate sends
+  
+  // Incident reference
+  incidentId          String
+  incidentRevision    Int // Monotonic revision number
+  
+  // Delivery tracking
+  status              WebhookDeliveryStatus @default(PENDING)
+  attemptCount        Int @default(0)
+  maxAttempts         Int @default(8)
+  nextAttemptAt       DateTime?
+  lastAttemptAt       DateTime?
+  
+  // Request/Response details
+  requestPayload      Json
+  responseCode        Int?
+  responseBodySnippet String? // Truncated to 2000 chars
+  responseHeaders     Json? // Selected response headers
+  error               String? // Error message if failed
+  
+  // Signature (for audit)
+  signatureHeader     String? // X-StatusClaw-Signature value
+  timestampHeader     String? // X-StatusClaw-Timestamp value
+  
+  // Timing
+  latencyMs           Int?
+  
+  createdAt           DateTime @default(now())
+  completedAt         DateTime?
+  
+  @@unique([webhookId, idempotencyKey])
+  @@index([webhookId, createdAt])
+  @@index([webhookId, status])
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, createdAt])
+}
